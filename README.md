@@ -32,8 +32,10 @@ CSS custom properties · deployed on Vercel.
 
 ## Setup
 
-1. Apply `supabase/migrations/0001_init.sql` to an empty database. That one file
-   rebuilds everything; there is no second migration.
+1. Apply every file in `supabase/migrations/` to an empty Supabase database, in
+   filename order, each file as its own transaction (0001a, 0001b, 0001c, 0002,
+   ...). Replayed clean on a fresh database on 22 Sep 2026. New schema changes
+   go in as a new numbered file; never edit one that has already been applied.
 2. Set the environment variables in `.env.example`. Shapes are validated at boot
    by `src/lib/env.ts`, which fails loudly rather than rendering zeroes.
 3. Create your admin row:

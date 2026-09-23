@@ -50,6 +50,11 @@ declare
   marked   integer;
   polluted integer;
 begin
+  -- Fresh rebuild: no client rows yet, so there is nothing to check.
+  if not exists (select 1 from clients) then
+    raise notice 'clients is empty (fresh rebuild); skipping this check';
+    return;
+  end if;
   select count(*) into marked
   from clients
   where is_internal
