@@ -127,8 +127,17 @@ export default async function SettingsPage() {
     (row) => row.provider === 'gohighlevel' && row.client_id === null,
   );
   const linkedClients = (locations.data ?? []).length;
+  // Ownership is client_ad_accounts (what windsor-ads reads), not the legacy
+  // clients.ad_account_id column.
+  const ownedAccounts = await db
+    .from('client_ad_accounts')
+    .select('client_id')
+    .eq('owns_spend', true);
+  const clientsOwningAccounts = new Set(
+    (ownedAccounts.data ?? []).map((row) => row.client_id),
+  );
   const unmappedLocations = (locations.data ?? []).filter(
-    (row) => row.is_active && row.ad_account_id === null,
+    (row) => row.is_active && !clientsOwningAccounts.has(row.id),
   ).length;
   const clientNoun = tenant.vocabulary.client;
   const locationNoun = tenant.vocabulary.location;

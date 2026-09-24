@@ -248,7 +248,17 @@ export async function syncWindsorAds(ctx: SyncContext): Promise<void> {
       externalId: string;
       name: string;
       campaignExternalId: string | null;
+      adsetExternalId: string | null;
       adsetName: string | null;
+    }
+  >();
+  const adSets = new Map<
+    string,
+    {
+      clientId: string;
+      externalId: string;
+      name: string;
+      campaignExternalId: string | null;
     }
   >();
   const insights = new Map<
@@ -357,8 +367,18 @@ export async function syncWindsorAds(ctx: SyncContext): Promise<void> {
         // not an identity — external_id is.
         name: row.adName ?? row.adExternalId,
         campaignExternalId: row.campaignExternalId,
+        adsetExternalId: row.adsetExternalId,
         adsetName: row.adsetName,
       });
+
+      if (row.adsetExternalId) {
+        adSets.set(`${PLATFORM}:${row.adsetExternalId}`, {
+          clientId: client.id,
+          externalId: row.adsetExternalId,
+          name: row.adsetName ?? row.adsetExternalId,
+          campaignExternalId: row.campaignExternalId,
+        });
+      }
 
       /*
        * ONE ROW PER AD PER DAY. NOT A SUM.
@@ -457,6 +477,30 @@ export async function syncWindsorAds(ctx: SyncContext): Promise<void> {
     (campaignRows.data ?? []).map((row) => [row.external_id, row.id]),
   );
 
+  if (adSets.size > 0) {
+    const written = await db.from('ad_sets').upsert(
+      [...adSets.values()].map((adSet) => ({
+        client_id: adSet.clientId,
+        campaign_id: adSet.campaignExternalId
+          ? (campaignIdByExternal.get(adSet.campaignExternalId) ?? null)
+          : null,
+        platform: PLATFORM,
+        external_id: adSet.externalId,
+        name: adSet.name,
+        synced_at: now,
+      })),
+      { onConflict: 'platform,external_id' },
+    );
+    if (written.error) throw written.error;
+    ctx.counts.updated += adSets.size;
+  } else if (ads.size > 0) {
+    // Windsor sent ads but no ad set ids: the field is not arriving.
+    ctx.recordError(
+      'Windsor returned no adset_id on any row, so no ad sets were written. ' +
+        'Check the field name against a live Windsor row.',
+    );
+  }
+
   if (ads.size > 0) {
     const written = await db.from('ads').upsert(
       [...ads.values()].map((ad) => ({
@@ -466,7 +510,8 @@ export async function syncWindsorAds(ctx: SyncContext): Promise<void> {
           : null,
         platform: PLATFORM,
         external_id: ad.externalId,
-        adset_external_id: ad.adsetName,
+        adset_external_id: ad.adsetExternalId,
+        adset_name: ad.adsetName,
         name: ad.name,
         synced_at: now,
       })),
@@ -578,7 +623,7 @@ export async function syncWindsorAds(ctx: SyncContext): Promise<void> {
   }
 
   ctx.log(
-    `${WINDSOR_CONNECTOR}: ${campaigns.size} campaigns, ${ads.size} ads, ` +
+    `${WINDSOR_CONNECTOR}: ${campaigns.size} campaigns, ${adSets.size} ad sets, ${ads.size} ads, ` +
       `${insights.size} ad-days, ${snapshots.size} client-days` +
       (duplicateAdDays > 0 ? `, ${duplicateAdDays} duplicate row(s) ignored` : ''),
   );

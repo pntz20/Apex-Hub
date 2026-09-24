@@ -232,9 +232,49 @@ export type Database = {
           },
         ]
       }
+      ad_sets: {
+        Row: {
+          campaign_id: string | null
+          client_id: string
+          created_at: string
+          external_id: string
+          id: string
+          name: string
+          platform: string
+          status: string | null
+          synced_at: string | null
+          updated_at: string
+        }
+        Insert: {
+          campaign_id?: string | null
+          client_id: string
+          created_at?: string
+          external_id: string
+          id?: string
+          name: string
+          platform?: string
+          status?: string | null
+          synced_at?: string | null
+          updated_at?: string
+        }
+        Update: {
+          campaign_id?: string | null
+          client_id?: string
+          created_at?: string
+          external_id?: string
+          id?: string
+          name?: string
+          platform?: string
+          status?: string | null
+          synced_at?: string | null
+          updated_at?: string
+        }
+        Relationships: []
+      }
       ads: {
         Row: {
           adset_external_id: string | null
+          adset_name: string | null
           campaign_id: string | null
           client_id: string
           created_at: string
@@ -250,6 +290,7 @@ export type Database = {
         }
         Insert: {
           adset_external_id?: string | null
+          adset_name?: string | null
           campaign_id?: string | null
           client_id: string
           created_at?: string
@@ -265,6 +306,7 @@ export type Database = {
         }
         Update: {
           adset_external_id?: string | null
+          adset_name?: string | null
           campaign_id?: string | null
           client_id?: string
           created_at?: string
@@ -585,6 +627,7 @@ export type Database = {
       appointments: {
         Row: {
           ad_external_id: string | null
+          adset_external_id: string | null
           address: string | null
           attribution_source: string | null
           booked_at: string | null
@@ -634,6 +677,7 @@ export type Database = {
         }
         Insert: {
           ad_external_id?: string | null
+          adset_external_id?: string | null
           address?: string | null
           attribution_source?: string | null
           booked_at?: string | null
@@ -683,6 +727,7 @@ export type Database = {
         }
         Update: {
           ad_external_id?: string | null
+          adset_external_id?: string | null
           address?: string | null
           attribution_source?: string | null
           booked_at?: string | null
@@ -2692,6 +2737,7 @@ export type Database = {
       crm_leads: {
         Row: {
           ad_external_id: string | null
+          adset_external_id: string | null
           campaign_external_id: string | null
           client_id: string
           created_at_utc: string
@@ -2710,6 +2756,7 @@ export type Database = {
         }
         Insert: {
           ad_external_id?: string | null
+          adset_external_id?: string | null
           campaign_external_id?: string | null
           client_id: string
           created_at_utc: string
@@ -2728,6 +2775,7 @@ export type Database = {
         }
         Update: {
           ad_external_id?: string | null
+          adset_external_id?: string | null
           campaign_external_id?: string | null
           client_id?: string
           created_at_utc?: string

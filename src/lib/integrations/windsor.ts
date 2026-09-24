@@ -10,6 +10,12 @@
  * `impressions`, `clicks`, `reach`, `frequency`, `actions_lead`. Note that
  * `leads` is NOT a field — it is `actions_lead`.
  *
+ * `adset_id` was added 24 Sep 2026 so ad sets can be joined to the Ad Set ID
+ * HighLevel stamps on leads (Fulfilment Sheet SOP). It is Windsor's documented
+ * Facebook field but had not been seen in a live row yet: Windsor had no
+ * Facebook accounts connected at the time. If it arrives empty, ad sets are
+ * simply not written and everything else carries on.
+ *
  * Verified from real rows: spend arrives as a NUMBER (0.19, 37.87), not the
  * decimal string the Graph API sends. It still goes through toCents() so both
  * shapes are safe.
@@ -32,6 +38,7 @@ const FIELDS = [
   'campaign',
   'ad_id',
   'ad_name',
+  'adset_id',
   'adset_name',
   'spend',
   'impressions',
@@ -49,6 +56,8 @@ export interface WindsorAdRow {
   campaignName: string | null;
   adExternalId: string;
   adName: string | null;
+  /** Meta's ad set id. Not yet confirmed against a live row (see header). */
+  adsetExternalId: string | null;
   adsetName: string | null;
   spendCents: number;
   impressions: number;
@@ -169,6 +178,7 @@ export async function fetchAdRows(
         campaignName: asString(record['campaign']),
         adExternalId,
         adName: asString(record['ad_name']),
+        adsetExternalId: asString(record['adset_id']),
         adsetName: asString(record['adset_name']),
         spendCents: toCents(record['spend']),
         impressions: toInt(record['impressions']),

@@ -186,6 +186,7 @@ export async function syncCrmLeads(ctx: SyncContext): Promise<void> {
         utm_medium: contact.attribution.utmMedium,
         utm_campaign: contact.attribution.utmCampaign,
         ad_external_id: contact.attribution.adId,
+        adset_external_id: contact.attribution.adsetId,
         campaign_external_id: contact.attribution.campaignId,
         synced_at: new Date().toISOString(),
       });

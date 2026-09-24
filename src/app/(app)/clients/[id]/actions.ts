@@ -13,6 +13,7 @@
  */
 import { revalidatePath } from 'next/cache';
 
+import { claimAdAccount, releaseAdAccount } from '@/lib/ad-accounts';
 import { requireAdmin } from '@/lib/supabase/server';
 import { serviceClient } from '@/lib/supabase/service';
 import type { ClientStatus } from '@/types/database';
@@ -172,11 +173,42 @@ export async function updateLocation(input: {
     return { ok: false, message: 'Ad account id should be digits only.' };
   }
 
-  const written = await serviceClient()
+  const db = serviceClient();
+
+  /*
+   * The ad account goes into client_ad_accounts, which is what windsor-ads
+   * reads. Writing clients.ad_account_id alone (as this did until 24 Sep
+   * 2026) changed nothing about where spend landed.
+   */
+  const before = await db
+    .from('clients')
+    .select('ad_account_id')
+    .eq('id', input.locationId)
+    .maybeSingle();
+  if (before.error) return { ok: false, message: before.error.message };
+  const previous = before.data?.ad_account_id ?? null;
+
+  if (adAccountId !== (previous ?? '')) {
+    if (adAccountId !== '') {
+      const claimed = await claimAdAccount(db, {
+        clientId: input.locationId,
+        accountId: adAccountId,
+      });
+      if (!claimed.ok) return claimed;
+    }
+    if (previous) {
+      const released = await releaseAdAccount(db, {
+        clientId: input.locationId,
+        accountId: previous,
+      });
+      if (!released.ok) return released;
+    }
+  }
+
+  const written = await db
     .from('clients')
     .update({
       name,
-      ad_account_id: adAccountId === '' ? null : adAccountId,
       timezone: input.timezone.trim(),
       scheduling_type: input.schedulingType.trim() || null,
       area_code: input.areaCode.trim() || null,

@@ -577,6 +577,7 @@ export async function syncCrmAppointments(ctx: SyncContext): Promise<void> {
         utm_content: contact?.attribution.utmContent ?? null,
         utm_term: contact?.attribution.utmTerm ?? null,
         ad_external_id: contact?.attribution.adId ?? null,
+        adset_external_id: contact?.attribution.adsetId ?? null,
         campaign_external_id: contact?.attribution.campaignId ?? null,
         booked_at: event.createdAt,
         ...(mapped.showed === null
@@ -610,6 +611,7 @@ export async function syncCrmAppointments(ctx: SyncContext): Promise<void> {
             'utm_content',
             'utm_term',
             'ad_external_id',
+            'adset_external_id',
             'campaign_external_id',
             'booked_at',
           ]),
@@ -682,6 +684,7 @@ export async function syncCrmAppointments(ctx: SyncContext): Promise<void> {
           'utm_content',
           'utm_term',
           'ad_external_id',
+          'adset_external_id',
           'campaign_external_id',
         ]),
         ...(moved

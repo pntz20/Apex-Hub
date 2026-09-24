@@ -917,6 +917,8 @@ export interface GhlContact {
     utmContent: string | null;
     utmTerm: string | null;
     adId: string | null;
+    /** Meta ad set id. See parseContact for where it is read from. */
+    adsetId: string | null;
     campaignId: string | null;
   };
   /** Key names only — see ContactShape. */
@@ -1215,6 +1217,39 @@ function parseContact(
       ? (attributions[0] as Record<string, unknown>)
       : {};
 
+  /*
+   * Where the ad ids live.
+   *
+   * The Fulfilment Sheet SOP (and the PPS Make scenarios) read
+   * contact.attributionSource: campaignId, adId, and utmTerm for the ad set
+   * (the ads' UTM puts the ad set there). This used to read only
+   * attributions[0], and 0 of 1,419 appointments had an ad or campaign id.
+   *
+   * Order: attributionSource (first touch, what the SOP uses), then
+   * attributions[0], then lastAttributionSource. Each field is taken from the
+   * first source that has it.
+   */
+  const asObject = (value: unknown): Record<string, unknown> =>
+    typeof value === 'object' && value !== null && !Array.isArray(value)
+      ? (value as Record<string, unknown>)
+      : {};
+  const firstTouch = asObject(record['attributionSource']);
+  const lastTouch = asObject(record['lastAttributionSource']);
+  const sources = [firstTouch, first, lastTouch];
+  const pick = (...keys: string[]): string | null => {
+    for (const source of sources) {
+      for (const key of keys) {
+        const value = asString(source[key]);
+        if (value !== null) return value;
+      }
+    }
+    return null;
+  };
+  // Meta ids are all digits. utmTerm is only an ad set id when it looks like one.
+  const digits = (value: string | null): string | null =>
+    value !== null && /^\d+$/.test(value) ? value : null;
+  const utmTerm = pick('utmTerm', 'utm_term');
+
   // Built in two steps on purpose: `a ?? b || c` is a SyntaxError, because
   // mixing ?? with || without parentheses is not allowed.
   const fullName = [asString(record['firstName']), asString(record['lastName'])]
@@ -1245,19 +1280,24 @@ function parseContact(
       : [],
     shape: {
       hasAttributions: attributions.length > 0,
-      attributionKeys: Object.keys(first),
+      attributionKeys: [
+        ...Object.keys(first),
+        ...Object.keys(firstTouch).map((key) => `attributionSource.${key}`),
+        ...Object.keys(lastTouch).map((key) => `lastAttributionSource.${key}`),
+      ],
       topLevelKeys: Object.keys(record).filter((key) =>
         /attribut|utm|source|campaign|ad/i.test(key),
       ),
     },
     attribution: {
-      utmSource: asString(first['utmSource']),
-      utmMedium: asString(first['utmMedium']),
-      utmCampaign: asString(first['campaign']),
-      utmContent: asString(first['utmContent']),
-      utmTerm: asString(first['utmTerm']),
-      adId: asString(first['adId']),
-      campaignId: asString(first['campaignId']),
+      utmSource: pick('utmSource', 'utm_source'),
+      utmMedium: pick('utmMedium', 'utm_medium'),
+      utmCampaign: pick('campaign', 'utmCampaign', 'utm_campaign'),
+      utmContent: pick('utmContent', 'utm_content'),
+      utmTerm,
+      adId: pick('adId', 'ad_id'),
+      adsetId: digits(pick('adSetId', 'adsetId', 'adset_id', 'adGroupId')) ?? digits(utmTerm),
+      campaignId: pick('campaignId', 'campaign_id'),
     },
   };
 }

@@ -11,6 +11,7 @@ import { EmptyState } from '@/components/ui/EmptyState';
 import { KPICard } from '@/components/ui/KPICard';
 import { PageHeader } from '@/components/ui/PageHeader';
 import { tenant, titleCase } from '@/config/tenant.config';
+import { ownedAccountsByClient } from '@/lib/ad-accounts';
 import { fetchAdAccounts, type WindsorAccount } from '@/lib/integrations/windsor';
 import { formatCount, formatMoneyCompact } from '@/lib/format';
 import { currentCaller } from '@/lib/supabase/server';
@@ -45,13 +46,21 @@ export default async function AdAccountsPage() {
 
   const clients = await db
     .from('clients')
-    .select('id, name, ad_account_id, group_id')
+    .select('id, name, group_id')
     .eq('is_active', true)
     .order('name');
 
   if (clients.error) throw clients.error;
 
   const rows = clients.data ?? [];
+
+  // Spend ownership lives in client_ad_accounts, the table windsor-ads reads.
+  const ownedByClient = await ownedAccountsByClient(db);
+  const clientNameById = new Map(
+    (
+      await db.from('clients').select('id, name')
+    ).data?.map((row) => [row.id, row.name]) ?? [],
+  );
 
   // Windsor is asked for its accounts here rather than stored, so the list is
   // whatever is connected right now. A failure is reported on the page: the
@@ -68,11 +77,12 @@ export default async function AdAccountsPage() {
     accountsError = error instanceof Error ? error.message : String(error);
   }
 
-  const nameByAccount = new Map(
-    rows
-      .filter((row) => row.ad_account_id !== null)
-      .map((row) => [row.ad_account_id as string, row.name]),
-  );
+  const nameByAccount = new Map<string, string>();
+  for (const [clientId, owned] of ownedByClient) {
+    for (const account of owned) {
+      nameByAccount.set(account.accountId, clientNameById.get(clientId) ?? clientId);
+    }
+  }
 
   const options: AccountOption[] = accounts.map((account) => ({
     id: account.id,
@@ -81,7 +91,7 @@ export default async function AdAccountsPage() {
     takenBy: nameByAccount.get(account.id) ?? null,
   }));
 
-  const mapped = rows.filter((row) => row.ad_account_id !== null);
+  const mapped = rows.filter((row) => (ownedByClient.get(row.id) ?? []).length > 0);
   const unclaimed = options.filter((option) => option.takenBy === null);
   const totalSpend = accounts.reduce(
     (sum, account) => sum + account.spendCents,
@@ -194,20 +204,22 @@ export default async function AdAccountsPage() {
                       <span className="block font-medium text-fg">
                         {row.name}
                       </span>
-                      {row.ad_account_id === null ? (
+                      {(ownedByClient.get(row.id) ?? []).length === 0 ? (
                         <span className="block text-xs text-fg-subtle">
                           no ad data will arrive until this is set
                         </span>
                       ) : (
                         <span className="numeric block text-xs text-fg-subtle">
-                          {row.ad_account_id}
+                          {(ownedByClient.get(row.id) ?? [])
+                            .map((account) => account.accountId)
+                            .join(', ')}
                         </span>
                       )}
                     </td>
                     <td className="px-4 py-3 text-right">
                       <AdAccountPicker
                         clientId={row.id}
-                        current={row.ad_account_id}
+                        owned={ownedByClient.get(row.id) ?? []}
                         options={options}
                       />
                     </td>
@@ -220,8 +232,8 @@ export default async function AdAccountsPage() {
       )}
 
       <p className="mt-4 max-w-2xl text-xs text-fg-subtle">
-        An account can only be mapped to one {locationNoun.singular}: mapping it
-        twice would count that spend twice and halve both practices&apos; cost
+        An account&apos;s spend can only belong to one {locationNoun.singular}:
+        a second owner would count that spend twice and halve both practices&apos; cost
         per {tenant.vocabulary.booking.singular}. Accounts already taken are
         greyed out with the name that holds them.
       </p>
