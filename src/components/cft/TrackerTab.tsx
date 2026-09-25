@@ -290,7 +290,9 @@ export async function TrackerTab({
    * the sheet on purpose.
    */
   const answeredPct = callRatio(calls.answeredOutbound, calls.dialed);
-  const conversationPct = callRatio(calls.calls2min, calls.dialed);
+  // Outbound only, like the table's Conversation % column: the denominator is
+  // outbound dials, so inbound 2-minute calls do not belong in the numerator.
+  const conversationPct = callRatio(calls.calls2minOutbound, calls.dialed);
   const speedToLead = callRatio(calls.speedToLeadSum, calls.speedToLeadN);
 
   /*

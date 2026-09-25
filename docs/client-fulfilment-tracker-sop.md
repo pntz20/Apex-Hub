@@ -53,7 +53,9 @@ the time it was written.
 | Tracker sheet — leads tab | `fulfilment-leads` | `tracker_leads` | Leads |
 | Tracker sheet — appointments | `fulfilment-tracker` | `tracker_appointments` | Appointments, shows, DQs, closes |
 | CRM appointments | `crm-appointments` | `appointments`, `appointment_ledger` | Appointments the sheet never recorded |
-| CRM calls | `crm-calls` | `calls` | Dials, pickups, talk time, speed to lead |
+| Call-centre dial log (HotProspector, via the call-centre workbook's RAW DATA tab) | `raw-call-rows` | `raw_call_rows` | Dials, pickups, conversations |
+| CRM calls | `crm-calls` | `calls` | Fallback for days the dial log has no rows |
+| CRM leads + either call feed | (view `v_lead_speed_to_lead`) | — | Speed to lead |
 
 ### When they run
 
@@ -61,7 +63,7 @@ the time it was written.
 |---|---|
 | `0 6 * * *` | `sync-all` — every feed above, in dependency order |
 | `0 18 * * *` | `crm-appointments` again |
-| `0 13,16,19,22 * * *` | `raw-call-rows` (call centre, not this tracker) |
+| `0 13,16,19,22 * * *` | `raw-call-rows` (call centre pay, and this tracker's call columns since migration 0096) |
 
 Order inside `sync-all` matters: `crm-clients` runs first so a new practice has
 a client row before anything tries to attach data to it.
@@ -104,20 +106,36 @@ that campaign. £0.00 per lead is the most flattering possible lie.
 
 ### 2. Call data (J–O) — client grain only
 
+Since migration 0096 the call columns come from the call-centre dial log
+(`raw_call_rows`, HotProspector), not HighLevel's `calls`: the dial log has
+about 8 times as many dials. On a day with no dial log rows at all (the Make
+scenario that writes it stopped after 16 Sep 2026), that day falls back to
+HighLevel calls; `v_cft_call_daily.call_source` says which. A call's day is its
+date in the call centre's time zone (`app_settings.call_centre_hours`,
+America/Los_Angeles). Dial log times are the lead's local time and are
+converted; exact duplicate dial log rows count once.
+
 | Column | Formula |
 |---|---|
 | Number of dialed calls | Outbound calls |
-| Calls 2+ minutes | Calls of 120s or more, **both directions** |
-| Speed To Lead | Average minutes from lead to first call |
-| Pickup % | Outbound calls **with talk time** ÷ dialed |
-| Conversation % | Outbound calls 2+ min ÷ dialed |
+| Calls 2+ minutes | Picked-up calls of 120s or more, both directions |
+| Speed To Lead | Average **call-centre working minutes** from HighLevel lead created to the first outbound dial to that phone number |
+| Pickup % | Outbound pickups ÷ dialed |
+| Conversation % | Outbound pickups of 2+ min ÷ dialed |
 | Dials per Lead | Dials ÷ leads |
 
-**Pickup % diverges from the spreadsheet deliberately.** See §6.
+**What a pickup is depends on the feed.** The dial log's duration includes
+ringing ("No Answer" dials run a median 31 s), so there a pickup is any dial
+the agent dispositioned as something other than "No Answer". On HighLevel
+fallback days it is an outbound call with talk time (see §6).
 
-**Speed To Lead excludes anything over 24 hours**, and the count it was measured
-on is shown beside it. A large excluded bracket means stale lead timestamps, not
-a slow team.
+**Speed To Lead counts working time only**: 06:00–18:00 Pacific, Monday to
+Saturday, from `app_settings.call_centre_hours` (change the hours there, no
+deploy needed). A lead that arrives at 11 PM and is dialled at 6:05 AM counts
+as 5 minutes. Leads and dials are matched on the last 10 digits of the phone
+number, because dial log lead ids are HotProspector ids, not HighLevel ones.
+Anything over 24 working hours is excluded from the average and shown beside
+it as a count.
 
 ### 3. Appointment data (P–W)
 
