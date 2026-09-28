@@ -1,10 +1,13 @@
+import { AdBreakdownTable } from '@/components/cft/AdBreakdownTable';
 import { ClientPicker } from '@/components/cft/ClientPicker';
+import { WideTableScroll } from '@/components/cft/WideTableScroll';
 import { DateRangePicker } from '@/components/ui/DateRangePicker';
 import { resolveRange } from '@/lib/range';
 import { StatsDashboard } from '@/components/cft/StatsDashboard';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { FilterPillLinks } from '@/components/ui/FilterPills';
 import { CPL_COLOUR_BANDS_ON_KPI, cplTone } from '@/config/cft-dashboard';
+import { type AdGrain, COVERAGE_FLOOR, isAdGrain, loadAdBreakdown } from '@/lib/cft-ads';
 import { COLUMNS } from '@/lib/cft-columns';
 import {
   type Breakdown,
@@ -215,7 +218,15 @@ export async function TrackerTab({
     return { from: iso(resolved.from), to: iso(resolved.to) };
   })();
 
-  const breakdown: Breakdown = single('bd') === 'client' ? 'client' : 'campaign';
+  /*
+   * Ad set and Ad (step 17) are their own table, not extra grains of the
+   * sheet mirror. The headline cards above them are read at client grain,
+   * the one grain every feed can answer, so they match the Client view.
+   */
+  const bdParam = single('bd');
+  const adGrain: AdGrain | null = isAdGrain(bdParam) ? bdParam : null;
+  const breakdown: Breakdown =
+    adGrain !== null || bdParam === 'client' ? 'client' : 'campaign';
   const clientId = single('client') !== '' ? single('client') : undefined;
 
   const sortParam = Number(single('sort'));
@@ -238,6 +249,10 @@ export async function TrackerTab({
     loadStatsDashboard(db, { days, range, breakdown, clientId }),
     feedFreshness(db),
   ]);
+  const ads =
+    adGrain === null
+      ? null
+      : await loadAdBreakdown(db, { from: result.from, to: result.to, grain: adGrain, clientId });
 
   // Clicking the sorted column flips it; clicking another starts descending,
   // which is what somebody scanning for the biggest number expects.
@@ -321,8 +336,10 @@ export async function TrackerTab({
           options={[
             { key: 'campaign', label: 'Campaign', href: href({ bd: 'campaign' }) },
             { key: 'client', label: 'Client', href: href({ bd: 'client' }) },
+            { key: 'adset', label: 'Ad set', href: href({ bd: 'adset' }) },
+            { key: 'ad', label: 'Ad', href: href({ bd: 'ad' }) },
           ]}
-          value={breakdown}
+          value={adGrain ?? breakdown}
         />
         <ClientPicker clients={result.clients} />
         <DateRangePicker />
@@ -344,7 +361,11 @@ export async function TrackerTab({
             <Kpi
               label="Amount spent"
               value={formatMoney(result.totals.spendCents)}
-              note={`${formatCount(result.rows.length)} ${breakdown} row(s)`}
+              note={
+                ads
+                  ? `${formatCount(ads.rows.length)} ${adGrain === 'ad' ? 'ad' : 'ad set'} row(s)`
+                  : `${formatCount(result.rows.length)} ${breakdown} row(s)`
+              }
             />
             <Kpi
               label="Leads"
@@ -449,15 +470,48 @@ export async function TrackerTab({
             />
           </div>
 
-          <StatsDashboard
-            rows={rows}
-            totals={result.totals}
-            breakdown={breakdown}
-            sort={sort}
-            direction={direction}
-            sortHrefs={COLUMNS.map((_column, index) => hrefForSort(index))}
-            clientViewHref={href({ bd: 'client' })}
-          />
+          {ads && adGrain ? (
+            <>
+              {/*
+                Coverage said above the table, not buried in a tooltip. Spend is
+                complete; leads and bookings are only what HighLevel attributes,
+                and somebody deciding where to move budget needs to know which
+                is which before reading a row.
+              */}
+              <p className="mb-2 max-w-4xl text-xs text-fg-muted">
+                <strong className="text-fg">Spend, impressions and clicks are complete.</strong>{' '}
+                Leads and bookings appear under an ad set only when HighLevel recorded it:{' '}
+                {formatPercent(ads.leadCoverage, 0)} of leads and{' '}
+                {formatPercent(ads.bookingCoverage, 0)} of bookings in this window. The rest sit on
+                each practice&rsquo;s &ldquo;Unattributed&rdquo; row, so every practice still adds
+                up. CPL and cost per booking stay blank until a practice has at least{' '}
+                {formatPercent(COVERAGE_FLOOR, 0)} attributed. Meta leads is Meta&rsquo;s own count
+                (lead forms) and runs far below HighLevel&rsquo;s.
+              </p>
+              {ads.rows.length === 0 ? (
+                <EmptyState
+                  title="No ad activity in this window"
+                  description="No spend, leads or bookings landed in the selected range."
+                />
+              ) : (
+                <div className="panel min-w-0 overflow-hidden rounded-lg border border-line bg-surface">
+                  <WideTableScroll>
+                    <AdBreakdownTable rows={ads.rows} totals={ads.totals} grain={adGrain} />
+                  </WideTableScroll>
+                </div>
+              )}
+            </>
+          ) : (
+            <StatsDashboard
+              rows={rows}
+              totals={result.totals}
+              breakdown={breakdown}
+              sort={sort}
+              direction={direction}
+              sortHrefs={COLUMNS.map((_column, index) => hrefForSort(index))}
+              clientViewHref={href({ bd: 'client' })}
+            />
+          )}
 
           {/*
             Said on the page, not only in a commit. This column used to mirror

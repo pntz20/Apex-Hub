@@ -24,6 +24,7 @@ import {
   sortRows,
   windowFor,
 } from '../src/lib/cft-stats';
+import { type AdViewRow, aggregateAds, deriveAd } from '../src/lib/cft-ads';
 
 let failures = 0;
 let checks = 0;
@@ -620,6 +621,80 @@ check(
   'numbers sort numerically',
   sortRows([{ n: 9 as number }, { n: 10 }, { n: 100 }], (r) => r.n, 'asc').map((r) => r.n),
   [9, 10, 100],
+);
+
+// ---------------------------------------------------------------------------
+// Ad set / ad breakdown (0099). Partial attribution is the case that matters:
+// a practice's rows must still add up, and a cost must not be divided over
+// the few leads that happen to carry an id.
+
+console.log('\nad set / ad breakdown');
+
+const adRow = (over: Partial<AdViewRow>): AdViewRow => ({
+  client_id: 'c1',
+  client_name: 'Practice',
+  group_id: 'g1',
+  status: 'Active',
+  campaign_external_id: 'cmp1',
+  campaign_name: 'Campaign',
+  adset_external_id: 'as1',
+  adset_name: 'Ad set 1',
+  ad_external_id: 'ad1',
+  ad_name: 'Ad 1',
+  spend_cents: 0,
+  impressions: 0,
+  clicks: 0,
+  leads_meta: 0,
+  leads_crm: 0,
+  bookings: 0,
+  shows: 0,
+  no_shows: 0,
+  cancels: 0,
+  revenue_cents: 0,
+  ...over,
+});
+
+const adView: AdViewRow[] = [
+  // Two days of spend on ad set 1 (two ads) and ad set 2.
+  adRow({ spend_cents: 10000, impressions: 1000, clicks: 10 }),
+  adRow({ ad_external_id: 'ad2', ad_name: 'Ad 2', spend_cents: 5000, impressions: 500, clicks: 5 }),
+  adRow({ adset_external_id: 'as2', adset_name: 'Ad set 2', ad_external_id: 'ad3', spend_cents: 20000 }),
+  // Attributed leads and bookings: 2 leads on as1 with no ad id, 1 booking that showed.
+  adRow({ ad_external_id: null, ad_name: null, leads_crm: 2, bookings: 1, shows: 1 }),
+  // Unattributed: 8 leads, 3 bookings.
+  adRow({ campaign_external_id: null, adset_external_id: null, adset_name: null, ad_external_id: null, ad_name: null, leads_crm: 8, bookings: 3 }),
+];
+
+const bySet = aggregateAds(adView, { grain: 'adset' });
+check('ad set grain: one row per ad set plus one unattributed', bySet.rows.length, 3);
+check('unattributed row sorts last within the practice', bySet.rows.at(-1)?.unattributed, true);
+check('totals keep every lead, attributed or not', bySet.totals.leads, 10);
+check('totals keep every booking', bySet.totals.bookings, 4);
+check('lead coverage is attributed / all', bySet.leadCoverage, 0.2);
+const as1 = bySet.rows.find((r) => r.adsetId === 'as1')!;
+check('ad set 1 sums both its ads', as1.spendCents, 15000);
+check('CPL blank below the coverage floor (20% attributed)', deriveAd(as1).cpl, null);
+check('show % still shown (attributed / attributed)', deriveAd(as1).showPct, 1);
+check('CTR from summed counters', deriveAd(as1).ctr, 15 / 1500);
+
+const covered = aggregateAds(
+  adView.filter((r) => r.adset_external_id !== null),
+  { grain: 'adset' },
+);
+const as1Covered = covered.rows.find((r) => r.adsetId === 'as1')!;
+check('CPL shown once coverage clears the floor', deriveAd(as1Covered).cpl, 150 / 2);
+
+const byAd = aggregateAds(adView, { grain: 'ad' });
+check(
+  'ad grain: leads with an ad set but no ad land on their own row',
+  byAd.rows.some((r) => r.adsetId === 'as1' && r.adId === null && r.leads === 2),
+  true,
+);
+check('ad grain keeps the same totals', [byAd.totals.leads, byAd.totals.spendCents], [10, 35000]);
+check(
+  'client filter drops other practices',
+  aggregateAds([...adView, adRow({ client_id: 'c2', spend_cents: 999 })], { grain: 'adset', clientId: 'c1' }).totals.spendCents,
+  35000,
 );
 
 // ---------------------------------------------------------------------------
