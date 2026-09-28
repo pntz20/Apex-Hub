@@ -10,6 +10,16 @@
  * `impressions`, `clicks`, `reach`, `frequency`, `actions_lead`. Note that
  * `leads` is NOT a field — it is `actions_lead`.
  *
+ * Leads are the larger of `actions_lead` and
+ * `actions_offsite_conversion_fb_pixel_custom`, per ad per day (28 Sep 2026).
+ * Apex's ads optimise on a Conversions API custom event (the "cAPI/CE" in the
+ * ad set names), which Meta does not count as a Lead: over the 30 days to
+ * 28 Sep, actions_lead summed to 82 across 33 accounts while the custom event
+ * summed to 1,366, against 1,460 HighLevel leads. Per practice the custom
+ * event tracks HighLevel closely (Abraham 11 v 11, Fiesta 158 v 171, Kind
+ * Dental 28 v 31). A few accounts report both, so the two are NOT added -
+ * that would double-count a lead that fires both events - the larger wins.
+ *
  * `adset_id` was added 24 Sep 2026 so ad sets can be joined to the Ad Set ID
  * HighLevel stamps on leads (Fulfilment Sheet SOP). It is Windsor's documented
  * Facebook field but had not been seen in a live row yet: Windsor had no
@@ -46,6 +56,7 @@ const FIELDS = [
   'reach',
   'frequency',
   'actions_lead',
+  'actions_offsite_conversion_fb_pixel_custom',
 ] as const;
 
 export interface WindsorAdRow {
@@ -185,7 +196,10 @@ export async function fetchAdRows(
         clicks: toInt(record['clicks']),
         reach: toInt(record['reach']),
         frequency: toFloat(record['frequency']),
-        metaLeads: toInt(record['actions_lead']),
+        metaLeads: Math.max(
+          toInt(record['actions_lead']),
+          toInt(record['actions_offsite_conversion_fb_pixel_custom']),
+        ),
       },
     ];
   });

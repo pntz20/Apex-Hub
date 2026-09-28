@@ -373,7 +373,7 @@ export async function TrackerTab({
               note={
                 freshness.leads === null
                   ? 'no leads recorded at all'
-                  : `last one ${day(freshness.leads)} · Windsor reports 0 for 30 of 32 accounts`
+                  : `sheet's last lead ${day(freshness.leads)} · otherwise Meta's count`
               }
               tone={result.totals.leads === 0 ? 'negative' : 'neutral'}
               noteTone="warning"
@@ -485,8 +485,8 @@ export async function TrackerTab({
                 {formatPercent(ads.bookingCoverage, 0)} of bookings in this window. The rest sit on
                 each practice&rsquo;s &ldquo;Unattributed&rdquo; row, so every practice still adds
                 up. CPL and cost per booking stay blank until a practice has at least{' '}
-                {formatPercent(COVERAGE_FLOOR, 0)} attributed. Meta leads is Meta&rsquo;s own count
-                (lead forms) and runs far below HighLevel&rsquo;s.
+                {formatPercent(COVERAGE_FLOOR, 0)} attributed. Meta leads is Meta&rsquo;s own count (its custom conversion event), which
+                runs close to HighLevel&rsquo;s.
               </p>
               {ads.rows.length === 0 ? (
                 <EmptyState
