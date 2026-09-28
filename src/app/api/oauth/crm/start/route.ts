@@ -30,6 +30,11 @@ const SCOPES = [
   'users.readonly',
   'conversations.readonly',
   'conversations/message.readonly',
+  // The Make dial log scenario (5560467) reads each location's custom fields
+  // with a Hub-minted location token; without this scope HighLevel returns 401
+  // "The token is not authorized for this scope" and Make switches it off.
+  'locations/customFields.readonly',
+  'contacts.write',
   // Required to mint per-location tokens from the agency install via
   // /oauth/locationToken. Without these the agency token authenticates fine
   // and then every mint fails — which is a confusing place to discover a
