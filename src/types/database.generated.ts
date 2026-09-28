@@ -630,6 +630,7 @@ export type Database = {
           adset_external_id: string | null
           address: string | null
           attribution_source: string | null
+          attribution_read_at: string | null
           booked_at: string | null
           booked_by_name: string | null
           booked_by_user_id: string | null
@@ -680,6 +681,7 @@ export type Database = {
           adset_external_id?: string | null
           address?: string | null
           attribution_source?: string | null
+          attribution_read_at?: string | null
           booked_at?: string | null
           booked_by_name?: string | null
           booked_by_user_id?: string | null
@@ -730,6 +732,7 @@ export type Database = {
           adset_external_id?: string | null
           address?: string | null
           attribution_source?: string | null
+          attribution_read_at?: string | null
           booked_at?: string | null
           booked_by_name?: string | null
           booked_by_user_id?: string | null

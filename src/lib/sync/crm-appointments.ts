@@ -72,6 +72,14 @@ export function isConsultationCalendar(calendar: { name: string | null }): boole
  */
 const MAX_CONTACT_LOOKUPS = 200;
 
+/**
+ * Of those lookups, how many may go to bookings that were enriched before the
+ * code read attributionSource (0094) and so never got their ad ids. Capped so
+ * a run always keeps most of its budget for bookings it has never seen; the
+ * old ones drain over a few runs (attribution_read_at, 0097).
+ */
+const MAX_ATTRIBUTION_REREADS = 60;
+
 interface MappedStatus {
   status: AppointmentStatus;
   /** null when the CRM has not said either way. Never guess false. */
@@ -160,6 +168,7 @@ export async function syncCrmAppointments(ctx: SyncContext): Promise<void> {
     to: to.toISOString().slice(0, 10),
   });
   let contactLookups = 0;
+  let attributionRereads = 0;
   /** One shape note per run is enough; see ctx.note beside the lookup. */
   let shapeNoted = false;
   /**
@@ -529,15 +538,29 @@ export async function syncCrmAppointments(ctx: SyncContext): Promise<void> {
        * spends its budget on bookings it has never looked at, and the backlog
        * actually drains.
        */
+      const neverEnriched = !current || current.patient_name === null;
+      /*
+       * Enriched, but before the contact's attributionSource was read, so it
+       * has a name and no ad ids. attribution_read_at (0097) marks the ones
+       * that have been read by the current code.
+       */
+      const staleAttribution =
+        !neverEnriched &&
+        current.attribution_read_at === null &&
+        attributionRereads < MAX_ATTRIBUTION_REREADS;
       const needsContact =
         event.contactId !== null &&
         contactLookups < MAX_CONTACT_LOOKUPS &&
-        (!current || current.patient_name === null);
+        (neverEnriched || staleAttribution);
+      let attributionRead = false;
 
       if (needsContact && event.contactId) {
         try {
           contact = await getContact(client.id, event.contactId);
           contactLookups += 1;
+          if (staleAttribution) attributionRereads += 1;
+          // A contact that no longer exists has nothing more to give either.
+          attributionRead = true;
 
           /*
            * Record what a contact payload actually carried, once per run.
@@ -580,6 +603,9 @@ export async function syncCrmAppointments(ctx: SyncContext): Promise<void> {
         adset_external_id: contact?.attribution.adsetId ?? null,
         campaign_external_id: contact?.attribution.campaignId ?? null,
         booked_at: event.createdAt,
+        ...(attributionRead
+          ? { attribution_read_at: new Date().toISOString() }
+          : {}),
         ...(mapped.showed === null
           ? {}
           : { showed: mapped.showed, showed_source: 'crm' }),
@@ -614,6 +640,7 @@ export async function syncCrmAppointments(ctx: SyncContext): Promise<void> {
             'adset_external_id',
             'campaign_external_id',
             'booked_at',
+            'attribution_read_at',
           ]),
         });
 
@@ -667,6 +694,7 @@ export async function syncCrmAppointments(ctx: SyncContext): Promise<void> {
           'scheduled_end_at',
           'status',
           'booked_at',
+          'attribution_read_at',
         ]),
         ...(clinicAnswered
           ? {}
@@ -714,6 +742,7 @@ export async function syncCrmAppointments(ctx: SyncContext): Promise<void> {
   }
 
   ctx.note('contact_lookups', contactLookups);
+  ctx.note('attribution_rereads', attributionRereads);
 
   /*
    * How much backlog is left.
