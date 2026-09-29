@@ -1,5 +1,6 @@
 import { AdBreakdownTable } from '@/components/cft/AdBreakdownTable';
 import { ClientPicker } from '@/components/cft/ClientPicker';
+import { BookingsTable } from '@/components/clients/BookingsTable';
 import { WideTableScroll } from '@/components/cft/WideTableScroll';
 import { DateRangePicker } from '@/components/ui/DateRangePicker';
 import { resolveRange } from '@/lib/range';
@@ -8,6 +9,7 @@ import { EmptyState } from '@/components/ui/EmptyState';
 import { FilterPillLinks } from '@/components/ui/FilterPills';
 import { CPL_COLOUR_BANDS_ON_KPI, cplTone } from '@/config/cft-dashboard';
 import { type AdGrain, COVERAGE_FLOOR, isAdGrain, loadAdBreakdown } from '@/lib/cft-ads';
+import { BOOKINGS_LIMIT, loadTrackerBookings } from '@/lib/cft-bookings';
 import { COLUMNS } from '@/lib/cft-columns';
 import {
   type Breakdown,
@@ -17,6 +19,7 @@ import {
   loadStatsDashboard,
   sortRows,
 } from '@/lib/cft-stats';
+import { tenant } from '@/config/tenant.config';
 import { cn } from '@/lib/cn';
 import { formatCount, formatMoney, formatPercent } from '@/lib/format';
 import { serviceClient } from '@/lib/supabase/service';
@@ -225,8 +228,11 @@ export async function TrackerTab({
    */
   const bdParam = single('bd');
   const adGrain: AdGrain | null = isAdGrain(bdParam) ? bdParam : null;
+  // Bookings (step 13) is a list, not a grain; its cards read at client grain
+  // like the Ad set and Ad views, so they match the Client view.
+  const bookingsView = bdParam === 'bookings';
   const breakdown: Breakdown =
-    adGrain !== null || bdParam === 'client' ? 'client' : 'campaign';
+    adGrain !== null || bookingsView || bdParam === 'client' ? 'client' : 'campaign';
   const clientId = single('client') !== '' ? single('client') : undefined;
 
   const sortParam = Number(single('sort'));
@@ -253,6 +259,9 @@ export async function TrackerTab({
     adGrain === null
       ? null
       : await loadAdBreakdown(db, { from: result.from, to: result.to, grain: adGrain, clientId });
+  const bookings = bookingsView
+    ? await loadTrackerBookings(db, { from: result.from, to: result.to, clientId })
+    : null;
 
   // Clicking the sorted column flips it; clicking another starts descending,
   // which is what somebody scanning for the biggest number expects.
@@ -338,8 +347,9 @@ export async function TrackerTab({
             { key: 'client', label: 'Client', href: href({ bd: 'client' }) },
             { key: 'adset', label: 'Ad set', href: href({ bd: 'adset' }) },
             { key: 'ad', label: 'Ad', href: href({ bd: 'ad' }) },
+            { key: 'bookings', label: 'Bookings', href: href({ bd: 'bookings' }) },
           ]}
-          value={adGrain ?? breakdown}
+          value={bookingsView ? 'bookings' : (adGrain ?? breakdown)}
         />
         <ClientPicker clients={result.clients} />
         <DateRangePicker />
@@ -470,7 +480,28 @@ export async function TrackerTab({
             />
           </div>
 
-          {ads && adGrain ? (
+          {bookings ? (
+            <>
+              {/*
+                Step 13: the SOP's Appointment Data tab, with the time of each
+                appointment in the practice's own timezone. Chosen by when the
+                booking was made, like the Appointments card above.
+              */}
+              <p className="mb-2 max-w-4xl text-xs text-fg-muted">
+                <strong className="text-fg">
+                  {formatCount(bookings.rows.length)}
+                  {bookings.truncated ? '+' : ''} booking(s) made in this window
+                </strong>
+                , newest appointment first. Times are in each practice&rsquo;s own timezone.
+                {bookings.truncated
+                  ? ` Showing the first ${formatCount(BOOKINGS_LIMIT)}; pick a client or a shorter range to see the rest.`
+                  : ''}
+              </p>
+              <div className="panel min-w-0 overflow-hidden rounded-lg border border-line bg-surface">
+                <BookingsTable rows={bookings.rows} currency={tenant.defaultCurrency} showLocation={!clientId} />
+              </div>
+            </>
+          ) : ads && adGrain ? (
             <>
               {/*
                 Coverage said above the table, not buried in a tooltip. Spend is
