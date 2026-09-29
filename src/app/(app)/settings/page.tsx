@@ -262,6 +262,13 @@ export default async function SettingsPage() {
                 >
                   Map ad accounts
                 </Link>
+                {' · '}
+                <Link
+                  href="/settings/tracker-mappings"
+                  className="text-accent hover:underline"
+                >
+                  Tracker mappings
+                </Link>
               </p>
             </div>
             <StatusPill
