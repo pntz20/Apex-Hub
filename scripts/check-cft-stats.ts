@@ -21,6 +21,7 @@ import {
   type StatsViewRow,
   aggregate,
   derive,
+  offerFromCampaign,
   sortRows,
   windowFor,
 } from '../src/lib/cft-stats';
@@ -299,6 +300,24 @@ check('the client filter narrows it', filteredCalls.callTotals.dialed, 12);
 // No calls at all is zero, not a crash — and zero is a real answer here,
 // unlike at row level where absent was the honest one.
 check('no calls is zero', aggregate([stat()], [], campaign).callTotals.dialed, 0);
+
+section('Offer name from the campaign name');
+check('price segment', offerFromCampaign('Apex | $3997 Total Price | LP'), '$3997 Total Price');
+check('discount with emoji', offerFromCampaign('🟢  [Landing Page] Conversion | Apex | $2000 Off'), '$2000 Off');
+check('drops "- Copy"', offerFromCampaign('Apex | Hancock | $3497 Total Price for Invisalign - Copy'), '$3497 Total Price for Invisalign');
+check('treatment when no price', offerFromCampaign('Apex | Clear Aligners | LP'), 'Clear Aligners');
+check('placeholder stays blank', offerFromCampaign('Apex | Conversion | $xxxx OFF'), null);
+check('no offer stays blank', offerFromCampaign('Apex | The Smile Lounge | LP'), null);
+check(
+  'sheet offer wins over the campaign name',
+  aggregate([stat({ offer_name: 'Free consult', campaign_name: 'Apex | $1500 Off' })], [], campaign).rows[0]!.offerName,
+  'Free consult',
+);
+check(
+  'blank sheet offer falls back to the campaign name',
+  aggregate([stat({ offer_name: null, campaign_name: 'Apex | $1500 Off' })], [], campaign).rows[0]!.offerName,
+  '$1500 Off',
+);
 
 section('Revenue and ROI (stat-sheet treatment value, 0095)');
 const valued = aggregate(

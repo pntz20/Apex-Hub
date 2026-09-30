@@ -434,6 +434,34 @@ export async function loadStatsDashboard(
 }
 
 /**
+ * The offer, read out of the campaign name when the sheet has none.
+ *
+ * Offer Name (column F) is blank on every tracker row since August: the
+ * central tab stopped on 27 Aug and the stat sheets fill it on 3 rows in 140.
+ * The campaign names carry it by convention ("Apex | $3997 Total Price | LP"),
+ * so the segment that names a price or a discount is taken, else the one that
+ * names a treatment. "$xxxx" placeholders and names with neither stay blank:
+ * a guess would be worse than the gap.
+ */
+export function offerFromCampaign(campaignName: string | null): string | null {
+  if (!campaignName) return null;
+  const segments = campaignName
+    .split('|')
+    .map((part) =>
+      part
+        .replace(/[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}]/gu, '')
+        .replace(/\s+-\s+Copy\s*$/i, '')
+        .replace(/\s+/g, ' ')
+        .trim(),
+    )
+    .filter((part) => part !== '' && !/\$x+/i.test(part));
+  const priced = segments.filter((part) => /\$\s?\d|\boff\b|\bfree\b|\ball in\b/i.test(part));
+  if (priced.length > 0) return priced.join(' | ');
+  const treatment = segments.filter((part) => /invisalign|braces|aligner|implant/i.test(part));
+  return treatment.length > 0 ? treatment.join(' | ') : null;
+}
+
+/**
  * The aggregation, with no database in it.
  *
  * Separated so it can be exercised directly: this is where a grouping or
@@ -510,7 +538,10 @@ export function aggregate(
         clientName: row.client_name,
         campaignName: options.breakdown === 'client' ? null : row.campaign_name,
         campaignId: options.breakdown === 'client' ? null : row.campaign_id_external,
-        offerName: options.breakdown === 'client' ? null : row.offer_name,
+        offerName:
+          options.breakdown === 'client'
+            ? null
+            : (row.offer_name ?? offerFromCampaign(row.campaign_name)),
         spendCents: 0,
         leads: 0,
         apptsCreated: 0,
