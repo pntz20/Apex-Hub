@@ -34,6 +34,12 @@ const SCOPES = [
   // with a Hub-minted location token; without this scope HighLevel returns 401
   // "The token is not authorized for this scope" and Make switches it off.
   'locations/customFields.readonly',
+  // Onboarding fills a new sub-account's custom values from the form answers
+  // (lib/integrations/ghl-provision.ts) with a location token minted here.
+  // Without these, provisioning creates the account and then 401s on
+  // /locations/{id}/customValues — seen 30 Sep 2026 on the first real run.
+  'locations/customValues.readonly',
+  'locations/customValues.write',
   'contacts.write',
   // Required to mint per-location tokens from the agency install via
   // /oauth/locationToken. Without these the agency token authenticates fine

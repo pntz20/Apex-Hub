@@ -211,8 +211,15 @@ export async function provisionFromSubmission(input: {
       });
       locationId = created.locationId;
     } catch (error) {
-      const scope = error instanceof GhlWriteError && error.isScopeProblem;
       const detail = error instanceof Error ? error.message : String(error);
+      /*
+       * "The company does not have access to this feature" is a plan limit, not
+       * a scope: HighLevel only allows POST /locations/ on Agency Pro. Said so
+       * plainly, because the scope advice below sent the first real onboarding
+       * (30 Sep 2026) chasing a token that was already fine.
+       */
+      const planLimited = /does not have access to this feature/i.test(detail);
+      const scope = !planLimited && error instanceof GhlWriteError && error.isScopeProblem;
 
       await record('failed', {
         error: detail,
@@ -222,7 +229,12 @@ export async function provisionFromSubmission(input: {
       return {
         ok: false,
         status: 'failed',
-        message: scope
+        message: planLimited
+          ? 'GoHighLevel only lets the Agency Pro plan create sub-accounts through ' +
+            'the API. Create this sub-account by hand in HighLevel from the ' +
+            'onboarding snapshot, link its location id to this attempt, then press ' +
+            `Retry to fill its custom values. (${detail})`
+          : scope
           ? 'GoHighLevel refused the request as unauthorised. The connected app ' +
             'needs the locations.write scope — re-authorise it in agency ' +
             'settings, then press Retry. The submission is saved; nothing is lost. ' +
