@@ -2756,6 +2756,9 @@ export type Database = {
           utm_campaign: string | null
           utm_medium: string | null
           utm_source: string | null
+          utm_content: string | null
+          utm_term: string | null
+          ad_ids_from_names: boolean
         }
         Insert: {
           ad_external_id?: string | null
@@ -2775,6 +2778,9 @@ export type Database = {
           utm_campaign?: string | null
           utm_medium?: string | null
           utm_source?: string | null
+          utm_content?: string | null
+          utm_term?: string | null
+          ad_ids_from_names?: boolean
         }
         Update: {
           ad_external_id?: string | null
@@ -2794,6 +2800,9 @@ export type Database = {
           utm_campaign?: string | null
           utm_medium?: string | null
           utm_source?: string | null
+          utm_content?: string | null
+          utm_term?: string | null
+          ad_ids_from_names?: boolean
         }
         Relationships: [
           {

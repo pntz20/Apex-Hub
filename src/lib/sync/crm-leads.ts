@@ -185,6 +185,11 @@ export async function syncCrmLeads(ctx: SyncContext): Promise<void> {
         utm_source: contact.attribution.utmSource,
         utm_medium: contact.attribution.utmMedium,
         utm_campaign: contact.attribution.utmCampaign,
+        // utm_content is the ad name and utm_term the ad set id in the UTM
+        // string set on 29 Sep. HighLevel drops the ad_id parameter, so
+        // migration 0102 looks the ad up from these names inside the practice.
+        utm_content: contact.attribution.utmContent,
+        utm_term: contact.attribution.utmTerm,
         ad_external_id: contact.attribution.adId,
         adset_external_id: contact.attribution.adsetId,
         campaign_external_id: contact.attribution.campaignId,
