@@ -65,6 +65,7 @@ function stat(over: Partial<StatsViewRow> = {}): StatsViewRow {
     cancels: 0,
     dqs: 0,
     closes: 0,
+    revenue_cents: 0,
     ...over,
   };
 }
@@ -298,6 +299,25 @@ check('the client filter narrows it', filteredCalls.callTotals.dialed, 12);
 // No calls at all is zero, not a crash — and zero is a real answer here,
 // unlike at row level where absent was the honest one.
 check('no calls is zero', aggregate([stat()], [], campaign).callTotals.dialed, 0);
+
+section('Revenue and ROI (stat-sheet treatment value, 0095)');
+const valued = aggregate(
+  [stat({ spend_cents: 100_000, revenue_cents: 350_000 }), stat({ spend_cents: 50_000, revenue_cents: 100_000 })],
+  [],
+  campaign,
+);
+check('revenue sums across the window', valued.totals.revenueCents, 450_000);
+check('ROI is revenue over spend', derive(valued.totals).roi, 3);
+check(
+  'no revenue recorded is blank, not 0.00x',
+  derive(aggregate([stat({ spend_cents: 100_000 })], [], campaign).rows[0]!).roi,
+  null,
+);
+check(
+  'revenue with no spend is blank, not infinite',
+  derive(aggregate([stat({ revenue_cents: 100_000 })], [], campaign).rows[0]!).roi,
+  null,
+);
 
 /*
  * A zero-second call is not a pickup.
@@ -570,9 +590,9 @@ check(
   0,
 );
 check(
-  'three columns have no Hub source at all',
+  'only Notes has no Hub source (Revenue and ROI come from the stat sheets, 0095)',
   COLUMNS.filter((c) => c.noSource).map((c) => c.letter),
-  ['A', 'AC', 'AD'],
+  ['A'],
 );
 
 section('Sorting');

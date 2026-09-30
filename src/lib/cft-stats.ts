@@ -70,6 +70,8 @@ export interface DashboardRow {
   cancels: number;
   dqs: number;
   closes: number;
+  /** Treatment value from the stat sheets (0095), in cents. */
+  revenueCents: number;
 
   /** The practice's calls, or at campaign grain its apportioned share of them. */
   calls?: CallCounters;
@@ -122,6 +124,8 @@ export interface Derived {
   costPerBooking: number | null;
   costPerShow: number | null;
   costPerClose: number | null;
+  /** Revenue / spend, as a multiple. Blank when no revenue is recorded. */
+  roi: number | null;
   speedToLead: number | null;
   pickupPct: number | null;
   conversationPct: number | null;
@@ -173,6 +177,12 @@ export function derive(row: DashboardRow): Derived {
     costPerBooking: costRatio(pounds, row.apptsCreated),
     costPerShow: costRatio(pounds, row.shows),
     costPerClose: costRatio(pounds, row.closes),
+    /*
+     * Revenue over spend, the same definition the rest of the Hub uses.
+     * Zero revenue is blank, not 0.00x: stat sheets carry a treatment value on
+     * only some closed rows, so zero usually means not recorded yet.
+     */
+    roi: row.revenueCents === 0 ? null : ratio(row.revenueCents, row.spendCents),
     speedToLead: calls ? ratio(calls.speedToLeadSum, calls.speedToLeadN) : null,
     /*
      * Talk time, not GoHighLevel's "connected".
@@ -276,6 +286,7 @@ export interface StatsViewRow {
   cancels: number | null;
   dqs: number | null;
   closes: number | null;
+  revenue_cents: number | null;
 }
 
 export interface CallViewRow {
@@ -401,7 +412,7 @@ export async function loadStatsDashboard(
       db
         .from('v_cft_stats_dashboard')
         .select(
-          'client_id, group_id, client_name, status, campaign_name, campaign_id_external, offer_name, spend_cents, leads_best, appts_created, appts_tracker, appts_to_be_taken, last_appt_date, shows, no_shows, cancels, dqs, closes',
+          'client_id, group_id, client_name, status, campaign_name, campaign_id_external, offer_name, spend_cents, leads_best, appts_created, appts_tracker, appts_to_be_taken, last_appt_date, shows, no_shows, cancels, dqs, closes, revenue_cents',
         )
         .gte('day', from)
         .lte('day', to)
@@ -511,6 +522,7 @@ export function aggregate(
         cancels: 0,
         dqs: 0,
         closes: 0,
+        revenueCents: 0,
       };
 
     held.spendCents += n(row.spend_cents);
@@ -523,6 +535,7 @@ export function aggregate(
     held.cancels += n(row.cancels);
     held.dqs += n(row.dqs);
     held.closes += n(row.closes);
+    held.revenueCents += n(row.revenue_cents);
 
     // Last Appt Date is a max, not a sum — the only non-additive column.
     if (row.last_appt_date && (held.lastApptDate === null || row.last_appt_date > held.lastApptDate)) {
@@ -561,6 +574,7 @@ export function aggregate(
         cancels: 0,
         dqs: 0,
         closes: 0,
+        revenueCents: 0,
         calls: counters,
       });
     }
@@ -607,6 +621,7 @@ export function aggregate(
           cancels: 0,
           dqs: 0,
           closes: 0,
+          revenueCents: 0,
           calls: counters,
         });
         continue;
@@ -643,6 +658,7 @@ export function aggregate(
     cancels: 0,
     dqs: 0,
     closes: 0,
+    revenueCents: 0,
     calls: emptyCalls(),
   };
 
@@ -657,6 +673,7 @@ export function aggregate(
     totals.cancels += row.cancels;
     totals.dqs += row.dqs;
     totals.closes += row.closes;
+    totals.revenueCents += row.revenueCents;
     if (row.lastApptDate && (totals.lastApptDate === null || row.lastApptDate > totals.lastApptDate)) {
       totals.lastApptDate = row.lastApptDate;
     }

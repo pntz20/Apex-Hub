@@ -300,23 +300,22 @@ export const COLUMNS: Column[] = [
     value: (_row, derived) => derived.closePct,
   },
   /*
-   * Revenue means patient case value, which the Hub records nowhere.
-   * billing_charges holds what Apex charges per consult — a different quantity
-   * — so it is deliberately not substituted, and ROI depends on it.
+   * Revenue is patient treatment value from the practices' stat sheets
+   * (migration 0095), matched to bookings on the HighLevel appointment id. Not
+   * billing_charges, which is what Apex charges per consult. It was in the view
+   * since 0095 but these columns still said "not recorded" until 30 Sep 2026.
    */
   {
     letter: 'AC',
     heading: 'Revenue',
     align: 'right',
-    noSource: true,
-    value: () => null,
+    value: (row) => (row.revenueCents === 0 ? null : row.revenueCents),
   },
   {
     letter: 'AD',
     heading: 'ROI',
     align: 'right',
-    noSource: true,
-    value: () => null,
+    value: (_row, derived) => derived.roi,
   },
 
   // 5. KPI METRICS

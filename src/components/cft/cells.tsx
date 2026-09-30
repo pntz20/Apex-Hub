@@ -35,7 +35,7 @@ const TONE_CLASS: Record<string, string> = {
 export type Renderer = (row: DashboardRow, derived: Derived) => ReactNode;
 
 export const RENDERERS: Record<string, Renderer> = {
-  // A, AC and AD have no Hub source at all; they render empty.
+  // A (Notes) has no Hub source; it renders empty.
   A: () => null,
   B: (row) => row.status ?? dash,
   C: (row) => row.clientName ?? dash,
@@ -97,8 +97,8 @@ export const RENDERERS: Record<string, Renderer> = {
 
   AA: (row) => count(row.closes),
   AB: (_row, d) => pct(d.closePct),
-  AC: () => null,
-  AD: () => null,
+  AC: (row) => (row.revenueCents === 0 ? dash : formatMoney(row.revenueCents)),
+  AD: (_row, d) => (d.roi === null ? dash : `${d.roi.toFixed(2)}x`),
 
   AE: (_row, d) => money(d.costPerBooking),
   AF: (_row, d) => money(d.costPerShow),
