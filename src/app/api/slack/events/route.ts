@@ -70,6 +70,7 @@ import { serverEnv, slackSigningSecret } from '@/lib/env';
 import { notifyUsers } from '@/lib/notify/inbox';
 import {
   addReaction,
+  filesOn,
   lookupChannelName,
   lookupUser,
   messagePermalink,
@@ -80,6 +81,13 @@ import { looksLikeARequest } from '@/lib/slack/classify';
 import { parseMention } from '@/lib/slack/mention';
 import { verifySlackSignature } from '@/lib/slack/signature';
 import { serviceClient } from '@/lib/supabase/service';
+import {
+  importSlackFiles,
+  isHumanReply,
+  recordSlackReply,
+  slackTextToPlain,
+  syncTicketFromSlack,
+} from '@/lib/tickets/slack-sync';
 
 export const dynamic = 'force-dynamic';
 
@@ -95,6 +103,7 @@ interface AppMentionEvent {
   channel?: string;
   bot_id?: string;
   subtype?: string;
+  files?: unknown[];
 }
 
 /**
@@ -259,6 +268,10 @@ async function promoteCandidate(event: ReactionAddedEvent) {
     lines.join('\n'),
   );
 
+  // The candidate row kept the words but not the screenshots or the replies
+  // since; the thread still has both.
+  await syncTicketFromSlack(inserted.data.id);
+
   return NextResponse.json({
     ok: true,
     ticketId: inserted.data.id,
@@ -287,6 +300,123 @@ interface MessageEvent {
   thread_ts?: string;
   subtype?: string;
   bot_id?: string;
+  text?: string;
+  files?: unknown[];
+  /** On subtype message_changed: the message as it now reads. */
+  message?: {
+    ts?: string;
+    thread_ts?: string;
+    user?: string;
+    bot_id?: string;
+    text?: string;
+  };
+}
+
+/**
+ * A reply in a ticket's Slack thread becomes a comment on the ticket.
+ *
+ * This is the Slack → Hub half of the two-way sync (the Hub → Slack half is
+ * addTicketComment / attachScreenshot). Bot messages are skipped, which is
+ * what stops a Hub comment the bot mirrored into the thread from coming back
+ * as a second copy. lib/tickets/slack-sync has the rest.
+ *
+ * An edit in Slack updates the comment's text. A deletion in Slack is left
+ * alone on the Hub on purpose: the ticket is the record.
+ *
+ * Never throws and never decides the response: the auto-reply capture still
+ * runs afterwards exactly as it did before.
+ */
+async function syncThreadReply(
+  event: MessageEvent,
+  botUserId: string | null,
+): Promise<void> {
+  const channelId = event.channel;
+  if (!channelId) return;
+
+  const db = serviceClient();
+
+  try {
+    if (event.subtype === 'message_changed') {
+      const edited = event.message;
+      if (!edited?.ts || !edited.thread_ts || edited.bot_id || edited.ts === edited.thread_ts) {
+        return;
+      }
+      const ticket = await db
+        .from('tech_tickets')
+        .select('id')
+        .eq('slack_channel_id', channelId)
+        .eq('slack_thread_ts', edited.thread_ts)
+        .limit(1)
+        .maybeSingle();
+      if (!ticket.data) return;
+
+      const text = slackTextToPlain(edited.text ?? '');
+      if (text === '') return;
+      await db
+        .from('tech_ticket_comments')
+        .update({ body: text })
+        .eq('ticket_id', ticket.data.id)
+        .eq('slack_message_ts', edited.ts)
+        .eq('source', 'slack');
+      return;
+    }
+
+    const threadTs = event.thread_ts;
+    const messageTs = event.ts;
+    if (!threadTs || !messageTs || threadTs === messageTs) return;
+
+    if (
+      !isHumanReply({
+        botId: event.bot_id ?? null,
+        subtype: event.subtype ?? null,
+        user: event.user ?? null,
+      }) ||
+      (botUserId !== null && event.user === botUserId)
+    ) {
+      return;
+    }
+
+    const ticket = await db
+      .from('tech_tickets')
+      .select('id, title, assigned_to, slack_message_ts')
+      .eq('slack_channel_id', channelId)
+      .eq('slack_thread_ts', threadTs)
+      .order('created_at', { ascending: true })
+      .limit(1)
+      .maybeSingle();
+
+    // Not a ticket thread, or this is the very message that raised the ticket
+    // (a mention inside someone else's thread): its text is the ticket body.
+    if (!ticket.data || ticket.data.slack_message_ts === messageTs) return;
+
+    const reply = await recordSlackReply({
+      ticketId: ticket.data.id,
+      message: {
+        ts: messageTs,
+        user: event.user ?? null,
+        botId: null,
+        subtype: event.subtype ?? null,
+        text: event.text ?? '',
+        files: filesOn(event),
+      },
+      botUserId,
+    });
+
+    if (reply.created) {
+      await notifyUsers({
+        userIds: [ticket.data.assigned_to],
+        kind: 'info',
+        title: `${reply.authorName} replied in Slack on "${ticket.data.title}"`,
+        body: reply.body.length > 160 ? `${reply.body.slice(0, 157)}…` : reply.body,
+        href: `/tech-support/${ticket.data.id}`,
+      });
+    }
+  } catch (error) {
+    console.error(
+      '[slack] syncing a thread reply failed:',
+      error instanceof Error ? error.message : error,
+    );
+  }
 }
 
 /**
@@ -459,6 +589,11 @@ export async function POST(request: NextRequest) {
    * than message, so the two do not both fire on one message.
    */
   if (event.type === 'message') {
+    const authorizations = body.authorizations as { user_id?: string }[] | undefined;
+    await syncThreadReply(
+      event as unknown as MessageEvent,
+      Array.isArray(authorizations) ? (authorizations[0]?.user_id ?? null) : null,
+    );
     return captureForAutoReply(event as unknown as MessageEvent, body);
   }
 
@@ -669,21 +804,26 @@ export async function POST(request: NextRequest) {
       .maybeSingle();
 
     if (existing.data) {
-      const added = await db.from('tech_ticket_comments').insert({
-        ticket_id: existing.data.id,
-        // Slack people are not always Hub people. The name always resolves;
-        // the id only does when they have an account, and a comment credited
-        // to nobody is better than one credited to the wrong person.
-        author_id: raisedBy,
-        author_name: raiser?.name ?? event.user ?? 'Slack',
-        body: draft.body ?? firstPass.title ?? '',
+      /*
+       * Keyed on this message's ts, the same as every other Slack reply, so
+       * the message event for this very reply (Slack sends both) lands on the
+       * same comment rather than a second one. Files come along.
+       */
+      const added = await recordSlackReply({
+        ticketId: existing.data.id,
+        message: {
+          ts: messageTs,
+          user: event.user ?? null,
+          botId: null,
+          subtype: event.subtype ?? null,
+          text: event.text ?? '',
+          files: filesOn(event),
+        },
+        botUserId,
       });
 
-      if (added.error) {
-        console.error(
-          '[slack] appending to an existing ticket failed:',
-          added.error.message,
-        );
+      if (added.commentId === null) {
+        console.error('[slack] appending to an existing ticket failed');
       } else {
         await postThreadReply(
           channelId,
@@ -737,6 +877,17 @@ export async function POST(request: NextRequest) {
         .eq('slack_channel_id', channelId)
         .eq('slack_message_ts', messageTs)
         .maybeSingle();
+
+      // A retry because the first attempt ran out of time, often while
+      // copying the screenshot. Finish the copy; it skips what is there.
+      if (existing.data?.id && filesOn(event).length > 0) {
+        await importSlackFiles({
+          ticketId: existing.data.id,
+          files: filesOn(event),
+          uploadedByName: raiser?.name ?? null,
+          uploadedBy: raisedBy,
+        });
+      }
 
       return NextResponse.json({
         ok: true,
@@ -827,6 +978,21 @@ export async function POST(request: NextRequest) {
     postThreadReply(channelId, threadTs, lines.join('\n')),
     addReaction(channelId, messageTs, 'ticket'),
   ]);
+
+  /*
+   * The screenshot on the message, copied onto the ticket so the Tech Support
+   * tab shows it. After the reply, so a slow download never delays the
+   * confirmation; a Slack retry caused by it finishes the job (see above).
+   */
+  const files = filesOn(event);
+  if (files.length > 0) {
+    await importSlackFiles({
+      ticketId: inserted.data.id,
+      files,
+      uploadedByName: raiser?.name ?? null,
+      uploadedBy: raisedBy,
+    });
+  }
 
   return NextResponse.json({
     ok: true,

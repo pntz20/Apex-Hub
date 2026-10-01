@@ -18,6 +18,9 @@ import { EmptyState } from '@/components/ui/EmptyState';
 import { KPICard } from '@/components/ui/KPICard';
 import { PageHeader } from '@/components/ui/PageHeader';
 import { StatusPill, type Tone } from '@/components/ui/StatusPill';
+import { AttachmentThumbs } from '@/components/techsupport/AttachmentThumbs';
+import { slackMessageUrl } from '@/lib/slack/link';
+import { attachmentsFor, type Attachment } from '@/lib/tickets/attachments';
 import { ASSIGNABLE_ROLES } from '@/config/roles';
 import { tenant } from '@/config/tenant.config';
 import { formatCount, formatDateTimeInZone } from '@/lib/format';
@@ -69,7 +72,7 @@ export default async function TechSupportPage() {
     db
       .from('tech_tickets')
       .select(
-        'id, client_group_id, title, body, status, priority, assigned_to, raised_by_name, source, slack_channel_name, slack_permalink, resolution, resolved_at, created_at',
+        'id, client_group_id, title, body, status, priority, assigned_to, raised_by_name, source, slack_team_id, slack_channel_id, slack_channel_name, slack_message_ts, slack_thread_ts, slack_permalink, resolution, resolved_at, created_at',
       )
       .order('created_at', { ascending: false })
       .limit(200),
@@ -107,18 +110,33 @@ export default async function TechSupportPage() {
    */
   const ticketIds = (tickets.data ?? []).map((row) => row.id);
 
-  const [comments, caller] = await Promise.all([
+  const [comments, caller, attachmentsByTicket] = await Promise.all([
     ticketIds.length > 0
       ? db
           .from('tech_ticket_comments')
-          .select('id, ticket_id, author_id, author_name, body, created_at')
+          .select('id, ticket_id, author_id, author_name, body, source, created_at')
           .in('ticket_id', ticketIds)
           .order('created_at', { ascending: true })
       : Promise.resolve({ data: [], error: null }),
     currentCaller(),
+    // Screenshots, signed in one batch for every listed ticket.
+    attachmentsFor(ticketIds),
   ]);
 
   if (comments.error) throw comments.error;
+
+  /* A file on a comment shows under that comment; the rest on the ticket. */
+  const byComment = new Map<string, Attachment[]>();
+  const ticketFiles = new Map<string, Attachment[]>();
+  for (const [ticketId, list] of attachmentsByTicket) {
+    for (const item of list) {
+      if (item.commentId) {
+        byComment.set(item.commentId, [...(byComment.get(item.commentId) ?? []), item]);
+      } else {
+        ticketFiles.set(ticketId, [...(ticketFiles.get(ticketId) ?? []), item]);
+      }
+    }
+  }
 
   const commentsByTicket = new Map<string, TicketComment[]>();
   for (const comment of comments.data ?? []) {
@@ -129,6 +147,8 @@ export default async function TechSupportPage() {
       body: comment.body,
       when: formatDateTimeInZone(comment.created_at, zone, 'd MMM, HH:mm'),
       isOwn: comment.author_id !== null && comment.author_id === caller?.id,
+      source: comment.source === 'slack' ? 'slack' : 'hub',
+      attachments: byComment.get(comment.id) ?? [],
     });
     commentsByTicket.set(comment.ticket_id, thread);
   }
@@ -173,14 +193,28 @@ export default async function TechSupportPage() {
       assignedTo: row.assigned_to,
       raisedByName: row.raised_by_name,
       channelName: row.slack_channel_name,
-      permalink: row.slack_permalink,
+      permalink: threadUrl(row),
       clientGroupId: row.client_group_id,
       clientName: row.client_group_id
         ? (groupById.get(row.client_group_id) ?? null)
         : null,
       raisedWhen: formatDateTimeInZone(row.created_at, zone, 'd MMM yyyy'),
       resolution: row.resolution,
+      hasSlackThread: Boolean(row.slack_channel_id && (row.slack_thread_ts ?? row.slack_message_ts)),
     };
+  }
+
+  /** slack_permalink is never stored, so build the link from the ids. */
+  function threadUrl(row: (typeof ticketRows)[number]): string | null {
+    return (
+      row.slack_permalink ??
+      slackMessageUrl({
+        teamId: row.slack_team_id,
+        channelId: row.slack_channel_id,
+        threadTs: row.slack_thread_ts,
+        messageTs: row.slack_message_ts,
+      })
+    );
   }
 
   function ClientCell({ groupId }: { groupId: string | null }) {
@@ -248,6 +282,7 @@ export default async function TechSupportPage() {
                       <TicketDetail
                         ticket={summarise(row)}
                         comments={commentsByTicket.get(row.id) ?? []}
+                        attachments={ticketFiles.get(row.id) ?? []}
                         people={people}
                       >
                         {row.title}
@@ -275,9 +310,16 @@ export default async function TechSupportPage() {
                       </span>
                     ) : null}
 
-                    {row.slack_permalink ? (
+                    <AttachmentThumbs
+                      attachments={attachmentsByTicket.get(row.id) ?? []}
+                      size="sm"
+                      max={4}
+                      className="mt-2"
+                    />
+
+                    {threadUrl(row) ? (
                       <a
-                        href={row.slack_permalink}
+                        href={threadUrl(row) ?? undefined}
                         target="_blank"
                         rel="noreferrer"
                         className="mt-1 inline-flex items-center gap-1 text-xs text-fg-subtle hover:text-accent"
@@ -325,6 +367,7 @@ export default async function TechSupportPage() {
                       <TicketDetail
                         ticket={summarise(row)}
                         comments={commentsByTicket.get(row.id) ?? []}
+                        attachments={ticketFiles.get(row.id) ?? []}
                         people={people}
                       >
                         {row.title}

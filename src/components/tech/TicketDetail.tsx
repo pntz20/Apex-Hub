@@ -11,8 +11,11 @@ import {
   TicketStatusButtons,
   type Person,
 } from '@/components/tech/TicketControls';
+import { PullFromSlack } from '@/components/techsupport/PullFromSlack';
+import { TicketAttachments } from '@/components/techsupport/TicketAttachments';
 import { Modal } from '@/components/ui/Modal';
 import { StatusPill, type Tone } from '@/components/ui/StatusPill';
+import type { Attachment } from '@/lib/tickets/attachments';
 
 export interface TicketSummary {
   id: string;
@@ -28,6 +31,8 @@ export interface TicketSummary {
   clientName: string | null;
   raisedWhen: string;
   resolution: string | null;
+  /** True when the ticket came from Slack and has a thread to sync with. */
+  hasSlackThread: boolean;
 }
 
 function priorityTone(priority: string): Tone {
@@ -74,11 +79,14 @@ function statusTone(status: string): Tone {
 export function TicketDetail({
   ticket,
   comments,
+  attachments,
   people,
   children,
 }: {
   ticket: TicketSummary;
   comments: readonly TicketComment[];
+  /** Files on the ticket itself (not on a comment), with signed links. */
+  attachments: Attachment[];
   people: readonly Person[];
   /** The clickable thing in the row — usually the title. */
   children: React.ReactNode;
@@ -157,6 +165,8 @@ export function TicketDetail({
               Open the thread
             </a>
           ) : null}
+
+          {ticket.hasSlackThread ? <PullFromSlack ticketId={ticket.id} /> : null}
         </div>
 
         {ticket.body ? (
@@ -168,6 +178,8 @@ export function TicketDetail({
             No detail beyond the title — the whole request was one line.
           </p>
         )}
+
+        <TicketAttachments ticketId={ticket.id} attachments={attachments} canUpload />
 
         {ticket.resolution ? (
           <p className="mt-4 rounded-md bg-positive-subtle px-3 py-2 text-sm text-positive">

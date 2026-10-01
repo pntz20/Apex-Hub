@@ -44,6 +44,8 @@ export interface UploadOutcome {
   ok: boolean;
   message: string;
   attachmentId?: string;
+  /** True when the Slack file was already on the ticket and nothing was stored. */
+  duplicate?: boolean;
 }
 
 /**
@@ -73,8 +75,27 @@ export async function attachToTicket(input: {
   file: File;
   uploadedBy?: string | null;
   uploadedByName?: string | null;
+  /**
+   * Set when the file came from the ticket's Slack thread. Unique per ticket,
+   * so importing the same Slack file twice (a retry, the cron re-reading the
+   * thread) is answered "already here" instead of storing a second copy.
+   */
+  slackFileId?: string | null;
 }): Promise<UploadOutcome> {
   const { file } = input;
+  const db = serviceClient();
+
+  if (input.slackFileId) {
+    const existing = await db
+      .from('tech_ticket_attachments')
+      .select('id')
+      .eq('ticket_id', input.ticketId)
+      .eq('slack_file_id', input.slackFileId)
+      .maybeSingle();
+    if (existing.data) {
+      return { ok: true, message: 'Already attached.', attachmentId: existing.data.id, duplicate: true };
+    }
+  }
 
   if (file.size === 0) {
     return { ok: false, message: 'That file is empty.' };
@@ -93,8 +114,6 @@ export async function attachToTicket(input: {
       message: 'Only images and PDFs can be attached.',
     };
   }
-
-  const db = serviceClient();
 
   /*
    * Path is ticket id then a fresh uuid. Nothing from the uploaded filename
@@ -123,6 +142,7 @@ export async function attachToTicket(input: {
       size_bytes: file.size,
       uploaded_by: input.uploadedBy ?? null,
       uploaded_by_name: input.uploadedByName ?? null,
+      slack_file_id: input.slackFileId ?? null,
     })
     .select('id')
     .single();
@@ -134,6 +154,10 @@ export async function attachToTicket(input: {
      * delete through the app, and which still counts against storage.
      */
     await db.storage.from(BUCKET).remove([path]);
+    // Two imports of the same Slack file raced; the other one won.
+    if (row.error.code === '23505' && input.slackFileId) {
+      return { ok: true, message: 'Already attached.', duplicate: true };
+    }
     return { ok: false, message: 'Could not save that. Try again.' };
   }
 

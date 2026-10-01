@@ -387,3 +387,272 @@ export async function fetchMessageText(
 
   return typeof text === 'string' && text.trim() !== '' ? text : null;
 }
+
+/* ===========================================================================
+ * TICKET THREAD SYNC
+ *
+ * What the two-way sync between a ticket and its Slack thread needs: the
+ * replies in a thread, the files on them, and a way to put Hub files back.
+ * Scopes: channels:history / groups:history (replies), files:read (download),
+ * files:write (upload). Each call logs the Slack error code when a scope is
+ * missing, the same as everything above.
+ * ======================================================================== */
+
+/** A file as Slack describes it on a message. Only the fields the sync reads. */
+export interface SlackFile {
+  id: string;
+  name: string;
+  mimetype: string;
+  size: number;
+  urlPrivateDownload: string | null;
+}
+
+/** A message in a thread. Only the fields the sync reads. */
+export interface SlackThreadMessage {
+  ts: string;
+  user: string | null;
+  botId: string | null;
+  subtype: string | null;
+  text: string;
+  files: SlackFile[];
+}
+
+function toSlackFile(raw: unknown): SlackFile | null {
+  const file = raw as {
+    id?: string;
+    name?: string;
+    title?: string;
+    mimetype?: string;
+    size?: number;
+    url_private_download?: string;
+    url_private?: string;
+    mode?: string;
+  };
+  if (!file?.id) return null;
+  // A deleted file, or one hidden by retention, is a tombstone with no bytes.
+  if (file.mode === 'tombstone' || file.mode === 'hidden_by_limit') return null;
+  return {
+    id: file.id,
+    name: file.name?.trim() || file.title?.trim() || 'attachment',
+    mimetype: file.mimetype ?? '',
+    size: Number(file.size ?? 0),
+    urlPrivateDownload: file.url_private_download ?? file.url_private ?? null,
+  };
+}
+
+/** Files on a raw event or message payload. */
+export function filesOn(raw: unknown): SlackFile[] {
+  const list = (raw as { files?: unknown[] } | undefined)?.files;
+  if (!Array.isArray(list)) return [];
+  return list.map(toSlackFile).filter((file): file is SlackFile => file !== null);
+}
+
+/**
+ * The root and every reply in a thread, oldest first.
+ *
+ * Paged, because a long ticket thread passes the first page. Capped at five
+ * pages (1,000 messages) so a runaway thread cannot eat the cron's budget.
+ */
+export async function threadMessages(
+  channelId: string,
+  threadTs: string,
+  speaker: Speaker = speakerFor(channelId),
+): Promise<SlackThreadMessage[] | null> {
+  const out: SlackThreadMessage[] = [];
+  let cursor: string | undefined;
+
+  for (let page = 0; page < 5; page += 1) {
+    const payload = await call(
+      'conversations.replies',
+      { channel: channelId, ts: threadTs, limit: 200, ...(cursor ? { cursor } : {}) },
+      speaker,
+    );
+    if (!payload) return page === 0 ? null : out;
+
+    const messages = payload.messages as
+      | {
+          ts?: string;
+          user?: string;
+          bot_id?: string;
+          subtype?: string;
+          text?: string;
+          files?: unknown[];
+        }[]
+      | undefined;
+
+    for (const message of messages ?? []) {
+      if (!message.ts) continue;
+      out.push({
+        ts: message.ts,
+        user: message.user ?? null,
+        botId: message.bot_id ?? null,
+        subtype: message.subtype ?? null,
+        text: message.text ?? '',
+        files: filesOn(message),
+      });
+    }
+
+    const next = (payload.response_metadata as { next_cursor?: string } | undefined)
+      ?.next_cursor;
+    if (!next) break;
+    cursor = next;
+  }
+
+  return out;
+}
+
+/**
+ * Like postThreadReply, but hands back the posted message's ts so the Hub
+ * comment it mirrors can record where its copy lives.
+ */
+export async function postThreadMessage(
+  channelId: string,
+  threadTs: string,
+  text: string,
+  speaker: Speaker = speakerFor(channelId),
+): Promise<string | null> {
+  const payload = await call(
+    'chat.postMessage',
+    {
+      channel: channelId,
+      thread_ts: threadTs,
+      text,
+      unfurl_links: false,
+      unfurl_media: false,
+    },
+    speaker,
+  );
+  const ts = payload?.['ts'];
+  return typeof ts === 'string' ? ts : null;
+}
+
+/**
+ * The bytes of a Slack file.
+ *
+ * url_private needs the bot token as a Bearer header. Without files:read Slack
+ * does not refuse: it answers 200 with its HTML sign-in page. So the content
+ * type is checked, and HTML is treated as "no access", never saved as the
+ * screenshot.
+ */
+export async function downloadSlackFile(
+  file: SlackFile,
+): Promise<{ bytes: ArrayBuffer; contentType: string } | null> {
+  if (!file.urlPrivateDownload) return null;
+
+  let token: string;
+  try {
+    token = slackBotToken();
+  } catch {
+    return null;
+  }
+
+  try {
+    const response = await fetch(file.urlPrivateDownload, {
+      headers: { Authorization: `Bearer ${token}` },
+      redirect: 'follow',
+    });
+    const contentType = (response.headers.get('content-type') ?? '').split(';')[0]!.trim();
+
+    if (!response.ok || contentType === 'text/html') {
+      console.error(
+        `[slack] file ${file.id} could not be downloaded (${response.status} ${contentType}); does the app have files:read?`,
+      );
+      return null;
+    }
+
+    return { bytes: await response.arrayBuffer(), contentType: contentType || file.mimetype };
+  } catch (error) {
+    console.error(
+      `[slack] file ${file.id} download failed:`,
+      error instanceof Error ? error.message : error,
+    );
+    return null;
+  }
+}
+
+/** A form-encoded Web API call. files.getUploadURLExternal does not take JSON. */
+async function callForm(
+  method: string,
+  fields: Record<string, string>,
+): Promise<SlackResponse | null> {
+  let token: string;
+  try {
+    token = slackBotToken();
+  } catch (error) {
+    console.error(
+      `[slack] ${method} skipped:`,
+      error instanceof Error ? error.message : error,
+    );
+    return null;
+  }
+
+  try {
+    const response = await fetch(`${API_BASE}/${method}`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${token}`,
+        'Content-Type': 'application/x-www-form-urlencoded',
+      },
+      body: new URLSearchParams(fields).toString(),
+    });
+    const payload = (await response.json()) as SlackResponse;
+    if (!payload.ok) {
+      console.error(`[slack] ${method} rejected: ${payload.error ?? 'unknown'}`);
+      return null;
+    }
+    return payload;
+  } catch (error) {
+    console.error(
+      `[slack] ${method} could not be called:`,
+      error instanceof Error ? error.message : error,
+    );
+    return null;
+  }
+}
+
+/**
+ * Upload a file into a thread, as the bot. Returns Slack's file id.
+ *
+ * Slack's current three-step upload (files.upload was retired): ask for an
+ * upload URL, send the bytes there, then complete it into the channel and
+ * thread. Needs files:write, and the bot must be in the channel, which it is
+ * for any ticket it filed.
+ */
+export async function uploadFileToThread(input: {
+  channelId: string;
+  threadTs: string;
+  bytes: ArrayBuffer;
+  fileName: string;
+  initialComment?: string;
+}): Promise<string | null> {
+  const ticket = await callForm('files.getUploadURLExternal', {
+    filename: input.fileName,
+    length: String(input.bytes.byteLength),
+  });
+  const uploadUrl = ticket?.['upload_url'];
+  const fileId = ticket?.['file_id'];
+  if (typeof uploadUrl !== 'string' || typeof fileId !== 'string') return null;
+
+  try {
+    const sent = await fetch(uploadUrl, { method: 'POST', body: input.bytes });
+    if (!sent.ok) {
+      console.error(`[slack] file upload to ${fileId} failed with ${sent.status}`);
+      return null;
+    }
+  } catch (error) {
+    console.error(
+      '[slack] file upload failed:',
+      error instanceof Error ? error.message : error,
+    );
+    return null;
+  }
+
+  const done = await callForm('files.completeUploadExternal', {
+    files: JSON.stringify([{ id: fileId, title: input.fileName }]),
+    channel_id: input.channelId,
+    thread_ts: input.threadTs,
+    ...(input.initialComment ? { initial_comment: input.initialComment } : {}),
+  });
+
+  return done ? fileId : null;
+}

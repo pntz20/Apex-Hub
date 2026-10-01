@@ -5,7 +5,9 @@ import { useMemo, useRef, useState, useTransition } from 'react';
 import { addTicketComment } from '@/app/(app)/tech-support/actions';
 import { Button } from '@/components/ui/Button';
 import type { Person } from '@/components/tech/TicketControls';
+import { AttachmentThumbs } from '@/components/techsupport/AttachmentThumbs';
 import { cn } from '@/lib/cn';
+import type { Attachment } from '@/lib/tickets/attachments';
 
 export interface TicketComment {
   id: string;
@@ -14,6 +16,10 @@ export interface TicketComment {
   /** Rendered relative by the caller, which owns the timezone. */
   when: string;
   isOwn: boolean;
+  /** 'slack' = a reply in the ticket's Slack thread, copied in. */
+  source?: 'hub' | 'slack';
+  /** Screenshots that came with this comment (from Slack, usually). */
+  attachments?: readonly Attachment[];
 }
 
 /**
@@ -150,7 +156,8 @@ export function TicketComments({
         {comments.length === 0 ? (
           <p className="px-4 py-6 text-center text-xs text-fg-subtle">
             Nothing said yet. Type @ to tag somebody — they will see it in the
-            bell at the top of the page.
+            bell at the top of the page. Comments here are posted in the Slack
+            thread too, and replies there show up here.
           </p>
         ) : (
           <ul>
@@ -166,10 +173,18 @@ export function TicketComments({
                     {comment.authorName}
                   </span>
                   <span className="text-[11px] text-fg-subtle">{comment.when}</span>
+                  {comment.source === 'slack' ? (
+                    <span className="rounded bg-surface-sunken px-1.5 text-[10px] text-fg-subtle">
+                      via Slack
+                    </span>
+                  ) : null}
                 </span>
                 <p className="mt-1 whitespace-pre-line text-sm text-fg-muted">
                   {withMentions(comment.body, names)}
                 </p>
+                {comment.attachments && comment.attachments.length > 0 ? (
+                  <AttachmentThumbs attachments={comment.attachments} className="mt-2" />
+                ) : null}
               </li>
             ))}
           </ul>

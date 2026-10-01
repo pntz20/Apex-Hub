@@ -4762,6 +4762,7 @@ export type Database = {
           id: string
           mime_type: string
           size_bytes: number
+          slack_file_id: string | null
           storage_path: string
           ticket_id: string
           uploaded_by: string | null
@@ -4774,6 +4775,7 @@ export type Database = {
           id?: string
           mime_type: string
           size_bytes: number
+          slack_file_id?: string | null
           storage_path: string
           ticket_id: string
           uploaded_by?: string | null
@@ -4786,6 +4788,7 @@ export type Database = {
           id?: string
           mime_type?: string
           size_bytes?: number
+          slack_file_id?: string | null
           storage_path?: string
           ticket_id?: string
           uploaded_by?: string | null
@@ -4911,6 +4914,8 @@ export type Database = {
           created_at: string
           id: string
           mentioned_user_ids: string[]
+          slack_message_ts: string | null
+          source: string
           ticket_id: string
           updated_at: string
         }
@@ -4921,6 +4926,8 @@ export type Database = {
           created_at?: string
           id?: string
           mentioned_user_ids?: string[]
+          slack_message_ts?: string | null
+          source?: string
           ticket_id: string
           updated_at?: string
         }
@@ -4931,6 +4938,8 @@ export type Database = {
           created_at?: string
           id?: string
           mentioned_user_ids?: string[]
+          slack_message_ts?: string | null
+          source?: string
           ticket_id?: string
           updated_at?: string
         }

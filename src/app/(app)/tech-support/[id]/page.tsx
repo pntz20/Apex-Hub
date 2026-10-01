@@ -10,6 +10,7 @@ import {
   type Person,
 } from '@/components/tech/TicketControls';
 import { PageHeader } from '@/components/ui/PageHeader';
+import { PullFromSlack } from '@/components/techsupport/PullFromSlack';
 import { TicketAttachments } from '@/components/techsupport/TicketAttachments';
 import { slackMessageUrl } from '@/lib/slack/link';
 import { attachmentsFor } from '@/lib/tickets/attachments';
@@ -89,7 +90,7 @@ export default async function TicketPage({ params }: { params: { id: string } })
   const [comments, group] = await Promise.all([
     db
       .from('tech_ticket_comments')
-      .select('id, author_id, author_name, body, created_at')
+      .select('id, author_id, author_name, body, source, created_at')
       .eq('ticket_id', row.id)
       .order('created_at', { ascending: true }),
     row.client_group_id
@@ -110,19 +111,23 @@ export default async function TicketPage({ params }: { params: { id: string } })
     name: person.full_name?.trim() || person.email,
   }));
 
+  /*
+   * Signed per render, so a link cannot be stored and later fail. One round
+   * trip for the whole ticket rather than one per file. Files that came with a
+   * comment (a Slack reply's screenshot) show under that comment.
+   */
+  const allAttachments = (await attachmentsFor([row.id])).get(row.id) ?? [];
+  const attachments = allAttachments.filter((item) => item.commentId === null);
+
   const thread: TicketComment[] = (comments.data ?? []).map((comment) => ({
     id: comment.id,
     authorName: comment.author_name?.trim() || 'Somebody',
     body: comment.body,
     when: formatDateTimeInZone(comment.created_at, zone, 'd MMM, HH:mm'),
     isOwn: comment.author_id !== null && comment.author_id === caller?.id,
+    source: comment.source === 'slack' ? 'slack' : 'hub',
+    attachments: allAttachments.filter((item) => item.commentId === comment.id),
   }));
-
-  /*
-   * Signed per render, so a link cannot be stored and later fail. One round
-   * trip for the whole ticket rather than one per file.
-   */
-  const attachments = (await attachmentsFor([row.id])).get(row.id) ?? [];
 
   /*
    * The stored permalink wins when there is one, but there never is — the
@@ -202,6 +207,8 @@ export default async function TicketPage({ params }: { params: { id: string } })
               Open the thread
             </a>
           ) : null}
+
+          {row.slack_channel_id ? <PullFromSlack ticketId={row.id} /> : null}
         </div>
 
         {row.body ? (

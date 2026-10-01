@@ -10,8 +10,9 @@
 import { revalidatePath } from 'next/cache';
 
 import { ASSIGNABLE_ROLES } from '@/config/roles';
-import { postThreadReply } from '@/lib/slack/api';
+import { postThreadMessage, uploadFileToThread } from '@/lib/slack/api';
 import { attachToTicket } from '@/lib/tickets/attachments';
+import { syncTicketFromSlack } from '@/lib/tickets/slack-sync';
 import { notifyUsers } from '@/lib/notify/inbox';
 import { requirePermission } from '@/lib/supabase/server';
 import { serviceClient } from '@/lib/supabase/service';
@@ -345,13 +346,18 @@ export async function addTicketComment(input: {
   const authorName =
     author.data?.full_name?.trim() || author.data?.email || 'Somebody';
 
-  const written = await db.from('tech_ticket_comments').insert({
-    ticket_id: input.ticketId,
-    author_id: caller.id,
-    author_name: authorName,
-    body,
-    mentioned_user_ids: mentioned,
-  });
+  const written = await db
+    .from('tech_ticket_comments')
+    .insert({
+      ticket_id: input.ticketId,
+      author_id: caller.id,
+      author_name: authorName,
+      body,
+      mentioned_user_ids: mentioned,
+      source: 'hub',
+    })
+    .select('id')
+    .single();
 
   if (written.error) return { ok: false, message: written.error.message };
 
@@ -388,11 +394,18 @@ export async function addTicketComment(input: {
 
     if (threadTs) {
       try {
-        await postThreadReply(
+        const postedTs = await postThreadMessage(
           ticket.data.slack_channel_id,
           threadTs,
           `*${authorName}* commented on the Hub:\n${body}`,
         );
+        // Where the copy lives, so the two sides can be matched later.
+        if (postedTs) {
+          await db
+            .from('tech_ticket_comments')
+            .update({ slack_message_ts: postedTs })
+            .eq('id', written.data.id);
+        }
       } catch (error) {
         // Recorded, not raised. See above.
         console.error(
@@ -441,7 +454,7 @@ export async function attachScreenshot(
    */
   const ticket = await db
     .from('tech_tickets')
-    .select('id')
+    .select('id, slack_channel_id, slack_thread_ts, slack_message_ts')
     .eq('id', ticketId)
     .maybeSingle();
 
@@ -455,18 +468,86 @@ export async function attachScreenshot(
     .eq('id', caller.id)
     .maybeSingle();
 
+  const uploaderName =
+    author.data?.full_name?.trim() || author.data?.email || 'Somebody';
+
   const outcome = await attachToTicket({
     ticketId,
     file,
     uploadedBy: caller.id,
-    uploadedByName:
-      author.data?.full_name?.trim() || author.data?.email || 'Somebody',
+    uploadedByName: uploaderName,
   });
+
+  /*
+   * Into the Slack thread too, so whoever raised it sees the screenshot where
+   * they are. Best-effort, like comment mirroring: the file is saved on the
+   * Hub either way, and a missing files:write scope must not turn that into an
+   * error. The Slack file id is recorded so the thread sync knows it is ours.
+   */
+  let message = outcome.message;
+  const threadTs = ticket.data.slack_thread_ts ?? ticket.data.slack_message_ts;
+
+  if (outcome.ok && outcome.attachmentId && ticket.data.slack_channel_id && threadTs) {
+    try {
+      const slackFileId = await uploadFileToThread({
+        channelId: ticket.data.slack_channel_id,
+        threadTs,
+        bytes: await file.arrayBuffer(),
+        fileName: file.name || 'screenshot',
+        initialComment: `*${uploaderName}* attached this on the Hub.`,
+      });
+      if (slackFileId) {
+        await db
+          .from('tech_ticket_attachments')
+          .update({ slack_file_id: slackFileId })
+          .eq('id', outcome.attachmentId);
+        message = 'Attached, and posted in the Slack thread.';
+      } else {
+        message = 'Attached on the Hub. It could not be posted in Slack.';
+      }
+    } catch (error) {
+      console.error(
+        '[tech-support] sending an attachment to Slack failed:',
+        error instanceof Error ? error.message : error,
+      );
+    }
+  }
 
   if (outcome.ok) {
     revalidatePath('/tech-support');
     revalidatePath(`/tech-support/${ticketId}`);
   }
 
-  return { ok: outcome.ok, message: outcome.message };
+  return { ok: outcome.ok, message };
+}
+
+/**
+ * Re-read the ticket's Slack thread now, rather than waiting for the cron.
+ *
+ * For "somebody replied in Slack and I do not see it". Copies in any replies
+ * and screenshots that are missing; never duplicates what is there.
+ */
+export async function pullTicketFromSlack(ticketId: string): Promise<TechCallResult> {
+  await requirePermission('tech_support');
+
+  const result = await syncTicketFromSlack(ticketId);
+  if (!result.ok) {
+    return { ok: false, message: `Could not read Slack (${result.reason ?? 'unknown'}).` };
+  }
+
+  revalidatePath('/tech-support');
+  revalidatePath(`/tech-support/${ticketId}`);
+
+  const parts: string[] = [];
+  if (result.newComments > 0) {
+    parts.push(`${result.newComments} ${result.newComments === 1 ? 'reply' : 'replies'}`);
+  }
+  if (result.newFiles > 0) {
+    parts.push(`${result.newFiles} ${result.newFiles === 1 ? 'file' : 'files'}`);
+  }
+  let message = parts.length > 0 ? `Pulled ${parts.join(' and ')} from Slack.` : 'Up to date with Slack.';
+  if (result.skippedFiles > 0) {
+    message += ` ${result.skippedFiles} file(s) could not be copied (not an image/PDF, over 10 MB, or no files:read).`;
+  }
+  return { ok: true, message };
 }
