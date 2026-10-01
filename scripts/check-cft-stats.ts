@@ -67,6 +67,9 @@ function stat(over: Partial<StatsViewRow> = {}): StatsViewRow {
     dqs: 0,
     closes: 0,
     revenue_cents: 0,
+    showed_other: 0,
+    rescheduled: 0,
+    deposits_paid: 0,
     ...over,
   };
 }
@@ -570,18 +573,19 @@ check('and its CPL is blank', derive(nothing.totals).cpl, null);
 
 section('The column model matches the sheet');
 
-check('thirty-three columns', COLUMNS.length, 33);
-check('lettered A to AG in order', COLUMNS.map((c) => c.letter), LETTERS);
-check('and the letters end at AG', LETTERS[32], 'AG');
+check('the sheet\x27s thirty-three columns plus three for outcome detail', COLUMNS.length, 36);
+check('lettered A to AJ in order', COLUMNS.map((c) => c.letter), LETTERS);
+check('the sheet\x27s own letters still end at AG', LETTERS[32], 'AG');
+check('and the outcome detail is AH to AJ', LETTERS.slice(33), ['AH', 'AI', 'AJ']);
 check(
-  'the six section headers span every column',
+  'the section headers span every column',
   SECTIONS.reduce((total, s) => total + s.span, 0),
-  33,
+  36,
 );
 check(
-  'the sections are the sheet\x27s, in order',
+  'the sections are the sheet\x27s, in order, then outcome detail',
   SECTIONS.map((s) => s.label),
-  ['', 'CAMPAIGN INFORMATION', '1. AD DATA', '2. CALL DATA', '3. APPOINTMENT DATA', '4. DEALS', '5. KPI METRICS'],
+  ['', 'CAMPAIGN INFORMATION', '1. AD DATA', '2. CALL DATA', '3. APPOINTMENT DATA', '4. DEALS', '5. KPI METRICS', '6. OUTCOME DETAIL'],
 );
 /*
  * Two separate reasons, one hatching.
@@ -735,6 +739,22 @@ check(
   aggregateAds([...adView, adRow({ client_id: 'c2', spend_cents: 999 })], { grain: 'adset', clientId: 'c1' }).totals.spendCents,
   35000,
 );
+
+section('Outcome detail (step 14) sums like the other counters');
+{
+  const both = aggregate(
+    [
+      stat({ showed_other: 2, rescheduled: 1, deposits_paid: 3 }),
+      stat({ campaign_id_external: '222', campaign_name: 'Braces', showed_other: 1, rescheduled: 4, deposits_paid: 0 }),
+    ],
+    [],
+    { ...campaign, breakdown: 'client' },
+  );
+  check('showed - other summed per practice', both.rows[0]!.showedOther, 3);
+  check('rescheduled summed per practice', both.rows[0]!.rescheduled, 5);
+  check('deposit paid summed per practice', both.rows[0]!.depositsPaid, 3);
+  check('totals carry them too', [both.totals.showedOther, both.totals.rescheduled, both.totals.depositsPaid], [3, 5, 3]);
+}
 
 // ---------------------------------------------------------------------------
 

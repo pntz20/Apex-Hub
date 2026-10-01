@@ -70,6 +70,12 @@ export interface DashboardRow {
   cancels: number;
   dqs: number;
   closes: number;
+  /** Shows with no Closed / DQ / Follow up result (0106). */
+  showedOther: number;
+  /** Bookings that replace an earlier one, or that HighLevel moved (0106). */
+  rescheduled: number;
+  /** Bookings marked deposit collected (0106). */
+  depositsPaid: number;
   /** Treatment value from the stat sheets (0095), in cents. */
   revenueCents: number;
 
@@ -286,6 +292,9 @@ export interface StatsViewRow {
   cancels: number | null;
   dqs: number | null;
   closes: number | null;
+  showed_other: number | null;
+  rescheduled: number | null;
+  deposits_paid: number | null;
   revenue_cents: number | null;
 }
 
@@ -412,7 +421,7 @@ export async function loadStatsDashboard(
       db
         .from('v_cft_stats_dashboard')
         .select(
-          'client_id, group_id, client_name, status, campaign_name, campaign_id_external, offer_name, spend_cents, leads_best, appts_created, appts_tracker, appts_to_be_taken, last_appt_date, shows, no_shows, cancels, dqs, closes, revenue_cents',
+          'client_id, group_id, client_name, status, campaign_name, campaign_id_external, offer_name, spend_cents, leads_best, appts_created, appts_tracker, appts_to_be_taken, last_appt_date, shows, no_shows, cancels, dqs, closes, revenue_cents, showed_other, rescheduled, deposits_paid',
         )
         .gte('day', from)
         .lte('day', to)
@@ -553,6 +562,9 @@ export function aggregate(
         cancels: 0,
         dqs: 0,
         closes: 0,
+        showedOther: 0,
+        rescheduled: 0,
+        depositsPaid: 0,
         revenueCents: 0,
       };
 
@@ -566,6 +578,9 @@ export function aggregate(
     held.cancels += n(row.cancels);
     held.dqs += n(row.dqs);
     held.closes += n(row.closes);
+    held.showedOther += n(row.showed_other);
+    held.rescheduled += n(row.rescheduled);
+    held.depositsPaid += n(row.deposits_paid);
     held.revenueCents += n(row.revenue_cents);
 
     // Last Appt Date is a max, not a sum — the only non-additive column.
@@ -605,6 +620,9 @@ export function aggregate(
         cancels: 0,
         dqs: 0,
         closes: 0,
+        showedOther: 0,
+        rescheduled: 0,
+        depositsPaid: 0,
         revenueCents: 0,
         calls: counters,
       });
@@ -652,6 +670,9 @@ export function aggregate(
           cancels: 0,
           dqs: 0,
           closes: 0,
+          showedOther: 0,
+          rescheduled: 0,
+          depositsPaid: 0,
           revenueCents: 0,
           calls: counters,
         });
@@ -689,6 +710,9 @@ export function aggregate(
     cancels: 0,
     dqs: 0,
     closes: 0,
+    showedOther: 0,
+    rescheduled: 0,
+    depositsPaid: 0,
     revenueCents: 0,
     calls: emptyCalls(),
   };
@@ -704,6 +728,9 @@ export function aggregate(
     totals.cancels += row.cancels;
     totals.dqs += row.dqs;
     totals.closes += row.closes;
+    totals.showedOther += row.showedOther;
+    totals.rescheduled += row.rescheduled;
+    totals.depositsPaid += row.depositsPaid;
     totals.revenueCents += row.revenueCents;
     if (row.lastApptDate && (totals.lastApptDate === null || row.lastApptDate > totals.lastApptDate)) {
       totals.lastApptDate = row.lastApptDate;

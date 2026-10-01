@@ -51,12 +51,13 @@ export const SECTIONS = [
   { label: '3. APPOINTMENT DATA', span: 11 },
   { label: '4. DEALS', span: 4 },
   { label: '5. KPI METRICS', span: 3 },
+  { label: '6. OUTCOME DETAIL', span: 3 },
 ] as const;
 
-/** Sheet letters A through AG, in order. */
+/** Sheet letters A through AG, then AH-AJ for the outcome detail the sheet lacks. */
 export const LETTERS: string[] = [
   ...'ABCDEFGHIJKLMNOPQRSTUVWXYZ'.split(''),
-  ...'ABCDEFG'.split('').map((letter) => `A${letter}`),
+  ...'ABCDEFGHIJ'.split('').map((letter) => `A${letter}`),
 ];
 
 
@@ -336,6 +337,31 @@ export const COLUMNS: Column[] = [
     heading: 'Cost Per Close',
     align: 'right',
     value: (_row, derived) => derived.costPerClose,
+  },
+
+  /*
+   * 6. OUTCOME DETAIL (CFT step 14, approved 1 Oct 2026). Not on the sheet's
+   * STATS DASHBOARD, so they sit after it as AH-AJ rather than renumbering the
+   * columns everyone already knows by letter. They come from the SOP's
+   * post-appointment survey; see migration 0106 for how each is counted.
+   */
+  {
+    letter: 'AH',
+    heading: 'Showed - Other',
+    align: 'right',
+    value: (row) => row.showedOther,
+  },
+  {
+    letter: 'AI',
+    heading: 'Rescheduled',
+    align: 'right',
+    value: (row) => row.rescheduled,
+  },
+  {
+    letter: 'AJ',
+    heading: 'Deposit Paid',
+    align: 'right',
+    value: (row) => row.depositsPaid,
   },
 ];
 

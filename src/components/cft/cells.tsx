@@ -103,4 +103,8 @@ export const RENDERERS: Record<string, Renderer> = {
   AE: (_row, d) => money(d.costPerBooking),
   AF: (_row, d) => money(d.costPerShow),
   AG: (_row, d) => money(d.costPerClose),
+
+  AH: (row) => count(row.showedOther),
+  AI: (row) => count(row.rescheduled),
+  AJ: (row) => count(row.depositsPaid),
 };

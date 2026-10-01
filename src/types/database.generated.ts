@@ -6409,6 +6409,7 @@ export type Database = {
           client_name: string | null
           closes: number | null
           day: string | null
+          deposits_paid: number | null
           dqs: number | null
           follow_ups: number | null
           group_id: string | null
@@ -6421,7 +6422,9 @@ export type Database = {
           no_shows: number | null
           notes: string | null
           offer_name: string | null
+          rescheduled: number | null
           revenue_cents: number | null
+          showed_other: number | null
           shows: number | null
           spend_cents: number | null
           status: string | null
