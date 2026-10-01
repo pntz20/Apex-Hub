@@ -38,7 +38,16 @@ import {
   HUB_ONBOARDING_FORM_KEY,
 } from '@/lib/onboarding/ghl-form';
 import { setCustomValues } from '@/lib/integrations/ghl-provision';
-import { KICKOFF_FORM_KEY, kickoffClinicName, kickoffValues } from '@/lib/onboarding/kickoff';
+import {
+  KICKOFF_ALERT_CHANNEL,
+  KICKOFF_FORM_KEY,
+  type KickoffAlert,
+  kickoffClinicName,
+  kickoffSlackText,
+  kickoffValues,
+} from '@/lib/onboarding/kickoff';
+import { hubUrl } from '@/lib/app-url';
+import { postMessage } from '@/lib/slack/api';
 import { provisionFromSubmission } from '@/lib/onboarding/provision';
 import { serviceClient } from '@/lib/supabase/service';
 
@@ -446,7 +455,18 @@ async function handleKickoff(
 
   const { values, unmapped } = kickoffValues(input.answers);
 
+  const base = {
+    clinic: clinicName,
+    locationId,
+    written: [] as string[],
+    missing: [] as string[],
+    failed: [] as Array<{ name: string; reason: string }>,
+    unmapped,
+    provisioningUrl: hubUrl('/onboarding/provisioning'),
+  };
+
   if (!locationId || input.isTest) {
+    if (!input.isTest) await notifyTechTeam({ ...base, outcome: 'unmatched' });
     return NextResponse.json(
       {
         ok: true,
@@ -461,6 +481,13 @@ async function handleKickoff(
 
   try {
     const result = await setCustomValues(clientId, locationId, values);
+    await notifyTechTeam({
+      ...base,
+      outcome: 'written',
+      written: result.written,
+      missing: result.missing,
+      failed: result.failed,
+    });
     return NextResponse.json(
       {
         ok: true,
@@ -475,15 +502,31 @@ async function handleKickoff(
       { status: 200 },
     );
   } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    await notifyTechTeam({ ...base, outcome: 'failed', error: message });
     // Stored either way; a 200 so Make does not resend a saved submission.
     return NextResponse.json(
       {
         ok: true,
         submissionId: written.data?.id ?? null,
         kickoff: 'stored; writing values failed',
-        error: error instanceof Error ? error.message : String(error),
+        error: message,
       },
       { status: 200 },
     );
+  }
+}
+
+/**
+ * Tells #tech-team a kick off form came in, like the Sales to CSM handoff post.
+ * Best effort: postMessage logs and returns false on failure, and a Slack
+ * outage must not turn a saved submission into a Make retry.
+ */
+async function notifyTechTeam(alert: KickoffAlert): Promise<void> {
+  const channel = process.env.SLACK_KICKOFF_ALERT_CHANNEL || KICKOFF_ALERT_CHANNEL;
+  try {
+    await postMessage(channel, kickoffSlackText(alert), 'bot');
+  } catch (error) {
+    console.error('[kickoff] Slack alert failed:', error instanceof Error ? error.message : error);
   }
 }

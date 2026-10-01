@@ -117,6 +117,89 @@ export function kickoffValues(answers: Record<string, unknown>): {
   return { values, unmapped };
 }
 
+/** #tech-team, where the Sales to CSM handoff posts. Override with SLACK_KICKOFF_ALERT_CHANNEL. */
+export const KICKOFF_ALERT_CHANNEL = 'C094DPKSP45';
+
+export interface KickoffAlert {
+  clinic: string | null;
+  /** 'written' = values went onto the sub-account; the others say why not. */
+  outcome: 'written' | 'unmatched' | 'failed';
+  locationId: string | null;
+  written: string[];
+  missing: string[];
+  failed: Array<{ name: string; reason: string }>;
+  unmapped: string[];
+  error?: string;
+  /** Where the practice can be set up by hand, for the unmatched case. */
+  provisioningUrl: string | null;
+}
+
+/**
+ * The #tech-team message for a kick off form, laid out like the Sales to CSM
+ * handoff post so the two read as one onboarding thread of events. Unlike that
+ * post, a line with nothing to say is left out rather than shown empty.
+ *
+ * Field names only, never answers: pricing and insurance terms stay in the
+ * sub-account and on the stored submission.
+ */
+export function kickoffSlackText(alert: KickoffAlert): string {
+  const clinic = alert.clinic?.trim() || 'Unnamed clinic';
+  const lines: string[] = [];
+
+  if (alert.outcome === 'written') {
+    lines.push(':tada: *Kick Off Form Submitted!*');
+    lines.push('The kick off form is in and its answers are on the sub-account custom values.');
+  } else if (alert.outcome === 'unmatched') {
+    lines.push(':warning: *Kick Off Form Submitted - no sub-account matched*');
+    lines.push('The form is saved in the Hub, but no set-up sub-account was found for it, so nothing was written.');
+  } else {
+    lines.push(':warning: *Kick Off Form Submitted - custom values not written*');
+    lines.push('The form is saved in the Hub, but writing to the sub-account failed.');
+  }
+
+  lines.push('');
+  lines.push(`:hospital: Clinic: ${clinic}`);
+  if (alert.locationId) {
+    lines.push(`:link: Sub-account: <https://app.gohighlevel.com/v2/location/${alert.locationId}/dashboard|${alert.locationId}>`);
+  }
+
+  if (alert.outcome === 'written') {
+    const tried = alert.written.length + alert.missing.length + alert.failed.length;
+    lines.push(`:white_check_mark: Custom values written: ${alert.written.length} of ${tried}`);
+    if (alert.missing.length > 0) {
+      lines.push(`:grey_question: Not in the sub-account: ${alert.missing.join(', ')}`);
+    }
+    if (alert.failed.length > 0) {
+      lines.push(`:x: Refused: ${alert.failed.map((item) => item.name).join(', ')}`);
+    }
+  }
+  if (alert.outcome === 'failed' && alert.error) {
+    lines.push(`:x: Error: ${alert.error.slice(0, 200)}`);
+  }
+  if (alert.unmapped.length > 0) {
+    lines.push(`:memo: Questions with no custom value: ${alert.unmapped.length}`);
+  }
+
+  lines.push('');
+  if (alert.outcome === 'written') {
+    lines.push(
+      alert.missing.length + alert.failed.length > 0
+        ? 'Please fill in the values listed above by hand.'
+        : 'Please review and proceed with launch prep.',
+    );
+  } else if (alert.outcome === 'unmatched') {
+    lines.push(
+      alert.provisioningUrl
+        ? `Please set up the practice in <${alert.provisioningUrl}|Onboarding → Provisioning>, then write the values.`
+        : 'Please set up the practice in Onboarding → Provisioning, then write the values.',
+    );
+  } else {
+    lines.push('Please retry from the Hub or write the values by hand.');
+  }
+
+  return lines.join('\n');
+}
+
 /** The clinic the account manager named, for matching the practice. */
 export function kickoffClinicName(answers: Record<string, unknown>): string | null {
   for (const [question, raw] of Object.entries(answers)) {
