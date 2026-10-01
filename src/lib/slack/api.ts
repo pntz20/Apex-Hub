@@ -462,11 +462,19 @@ export async function threadMessages(
   let cursor: string | undefined;
 
   for (let page = 0; page < 5; page += 1) {
-    const payload = await call(
-      'conversations.replies',
-      { channel: channelId, ts: threadTs, limit: 200, ...(cursor ? { cursor } : {}) },
-      speaker,
-    );
+    /*
+     * Form-encoded, not JSON. conversations.replies is a read method and Slack
+     * answers a JSON body with invalid_arguments (seen on the first cron run,
+     * 1 Oct 00:20 UTC). The bot token is the only one used here; a DM thread
+     * has no ticket.
+     */
+    void speaker;
+    const payload = await callForm('conversations.replies', {
+      channel: channelId,
+      ts: threadTs,
+      limit: '200',
+      ...(cursor ? { cursor } : {}),
+    });
     if (!payload) return page === 0 ? null : out;
 
     const messages = payload.messages as
