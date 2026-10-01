@@ -51,6 +51,16 @@ const ACCEPTED = new Set<string>([
   KICKOFF_FORM_KEY,
 ]);
 
+/**
+ * Contact and workflow fields HighLevel adds to every workflow webhook. Not
+ * answers to anything the practice was asked, so they stay out of `answers`.
+ */
+const GHL_CONTEXT_KEYS = new Set([
+  'first_name', 'last_name', 'full_name', 'email', 'phone', 'tags', 'country',
+  'timezone', 'date_created', 'contact_source', 'full_address', 'contact_type',
+  'address1', 'city', 'state', 'postal_code', 'company_name', 'id',
+]);
+
 /** Keys that carry routing rather than an answer, so they stay out of payload. */
 const ENVELOPE = new Set([
   'form_key',
@@ -161,9 +171,32 @@ export async function POST(request: NextRequest) {
     );
   }
 
+  /*
+   * A raw GoHighLevel workflow body, forwarded untouched under `payload`.
+   *
+   * The kick off form's Make scenario (08) passes HighLevel's webhook through
+   * as-is rather than mapping each question, because the form's questions
+   * change and a per-field mapping silently drops a renamed one. In that shape
+   * every answer is a top-level key named after its question, contact_id is
+   * top-level, and the sub-account is the `location` object.
+   */
+  const raw = body['payload'];
+  const ghl =
+    typeof raw === 'object' && raw !== null && !Array.isArray(raw)
+      ? (raw as Record<string, unknown>)
+      : null;
+
   const nested = body['answers'];
-  const answers: Record<string, unknown> =
-    typeof nested === 'object' && nested !== null && !Array.isArray(nested)
+  const answers: Record<string, unknown> = ghl
+    ? Object.fromEntries(
+        Object.entries(ghl).filter(
+          ([key, value]) =>
+            !ENVELOPE.has(key) &&
+            !GHL_CONTEXT_KEYS.has(key) &&
+            (typeof value !== 'object' || value === null || Array.isArray(value)),
+        ),
+      )
+    : typeof nested === 'object' && nested !== null && !Array.isArray(nested)
       ? (nested as Record<string, unknown>)
       : Object.fromEntries(
           Object.entries(body).filter(([key]) => !ENVELOPE.has(key)),
@@ -203,8 +236,15 @@ export async function POST(request: NextRequest) {
     }
   }
 
-  const contactCrmId = text(body['contact_id'] ?? body['contactId']);
-  const sourceLocationId = text(body['location_id'] ?? body['locationId']);
+  const contactCrmId = text(body['contact_id'] ?? body['contactId'] ?? ghl?.['contact_id']);
+  const ghlLocation = ghl?.['location'];
+  const sourceLocationId = text(
+    body['location_id'] ??
+      body['locationId'] ??
+      (typeof ghlLocation === 'object' && ghlLocation !== null
+        ? (ghlLocation as Record<string, unknown>)['id']
+        : undefined),
+  );
 
   if (formKey === KICKOFF_FORM_KEY) {
     return handleKickoff(db, {
