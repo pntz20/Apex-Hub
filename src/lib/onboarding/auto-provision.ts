@@ -25,6 +25,18 @@ import type { serviceClient } from '@/lib/supabase/service';
 export const AUTO_PROVISION_FROM = new Date(Date.UTC(2026, 8, 1)).toISOString();
 
 /**
+ * Off since 1 Oct 2026 (CFT step 22, Josh's flow): a tech presses Set up.
+ *
+ * Unattended provisioning could never finish anyway - HighLevel only lets the
+ * Agency Pro plan create sub-accounts through the API, so every automatic
+ * attempt failed with a 403 and left a 'failed' row. Now the tech builds the
+ * sub-account from the snapshot in HighLevel, pastes its location id on the
+ * Provisioning page and presses Set up, which writes the values and adds the
+ * onboarding tag. Turn this back on only with Agency Pro.
+ */
+export const AUTO_PROVISION_ENABLED = false;
+
+/**
  * Does this group already have a GoHighLevel account under any of its locations?
  *
  * The second rail. An existing client filling the onboarding form again is a
@@ -52,6 +64,6 @@ export async function groupAlreadyLive(
 
 /** Is this submission recent enough to provision without being asked? */
 export function withinAutoProvisionWindow(submittedAt: string | null): boolean {
-  if (!submittedAt) return false;
+  if (!AUTO_PROVISION_ENABLED || !submittedAt) return false;
   return submittedAt >= AUTO_PROVISION_FROM;
 }

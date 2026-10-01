@@ -10,6 +10,7 @@
  */
 import { revalidatePath } from 'next/cache';
 
+import { adaptGhlOnboarding, GHL_ONBOARDING_FORM_KEY } from '@/lib/onboarding/ghl-form';
 import { provisionFromSubmission } from '@/lib/onboarding/provision';
 import { requireAdmin } from '@/lib/supabase/server';
 import { serviceClient } from '@/lib/supabase/service';
@@ -29,27 +30,31 @@ export interface RetryResult {
  */
 export async function provisionSubmission(input: {
   submissionId: string;
+  /** The sub-account the tech built by hand in HighLevel (CFT step 22). */
+  locationId?: string;
 }): Promise<RetryResult> {
   const caller = await requireAdmin();
   const db = serviceClient();
 
   const submission = await db
     .from('form_submissions')
-    .select('id, payload, clinic_name, client_group_id')
+    .select('id, payload, clinic_name, client_group_id, form_key')
     .eq('id', input.submissionId)
     .maybeSingle();
 
   if (submission.error) return { ok: false, message: submission.error.message };
   if (!submission.data) return { ok: false, message: 'No such submission.' };
 
-  const answers = (submission.data.payload ?? {}) as Record<string, string>;
+  const locationId = cleanLocationId(input.locationId);
+  if (locationId === false) return { ok: false, message: LOCATION_ID_HELP };
 
   const outcome = await provisionFromSubmission({
     submissionId: submission.data.id,
     clientGroupId: submission.data.client_group_id,
     clinicName: submission.data.clinic_name ?? '',
-    answers,
+    answers: answersOf(submission.data.form_key, submission.data.payload),
     startedBy: caller.id,
+    existingLocationId: locationId,
   });
 
   revalidatePath('/onboarding/provisioning');
@@ -58,6 +63,8 @@ export async function provisionSubmission(input: {
 
 export async function retryProvisioning(input: {
   runId: string;
+  /** For an attempt with no sub-account yet: the one built by hand. */
+  locationId?: string;
 }): Promise<RetryResult> {
   const caller = await requireAdmin();
   const db = serviceClient();
@@ -90,7 +97,7 @@ export async function retryProvisioning(input: {
 
   const submission = await db
     .from('form_submissions')
-    .select('id, payload, clinic_name, client_group_id')
+    .select('id, payload, clinic_name, client_group_id, form_key')
     .eq('id', run.data.submission_id)
     .maybeSingle();
 
@@ -99,20 +106,44 @@ export async function retryProvisioning(input: {
     return { ok: false, message: 'The submission behind this attempt is gone.' };
   }
 
-  const answers = (submission.data.payload ?? {}) as Record<string, string>;
+  const pasted = cleanLocationId(input.locationId);
+  if (pasted === false) return { ok: false, message: LOCATION_ID_HELP };
 
   const outcome = await provisionFromSubmission({
     submissionId: submission.data.id,
     clientGroupId: submission.data.client_group_id ?? run.data.client_group_id,
     clinicName: submission.data.clinic_name ?? run.data.clinic_name,
-    answers,
+    answers: answersOf(submission.data.form_key, submission.data.payload),
     startedBy: caller.id,
     // The crux of a safe retry: if the account already exists, configure it
     // rather than creating a second one for the same practice.
-    existingLocationId: run.data.crm_location_id,
+    existingLocationId: run.data.crm_location_id ?? pasted,
   });
 
   revalidatePath('/onboarding/provisioning');
 
   return { ok: outcome.ok, message: outcome.message };
+}
+
+const LOCATION_ID_HELP =
+  'That does not look like a HighLevel location id. Open the sub-account in ' +
+  'HighLevel and copy the part after /location/ in the address bar.';
+
+/**
+ * A pasted location id, tidied: a whole HighLevel URL is accepted and the id
+ * taken out of it. undefined = nothing pasted; false = pasted but not an id.
+ */
+function cleanLocationId(raw: string | undefined): string | null | false {
+  const trimmed = raw?.trim() ?? '';
+  if (trimmed === '') return null;
+  const fromUrl = trimmed.match(/\/location\/([A-Za-z0-9]{10,40})/);
+  const id = fromUrl ? fromUrl[1]! : trimmed;
+  return /^[A-Za-z0-9]{10,40}$/.test(id) ? id : false;
+}
+
+/** GoHighLevel's form speaks question text; the Hub's speaks field names. */
+function answersOf(formKey: string | null, payload: unknown): Record<string, string | undefined> {
+  return formKey === GHL_ONBOARDING_FORM_KEY
+    ? adaptGhlOnboarding((payload ?? {}) as Record<string, unknown>)
+    : ((payload ?? {}) as Record<string, string | undefined>);
 }

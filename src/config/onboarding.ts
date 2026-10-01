@@ -66,3 +66,16 @@ export const ONBOARDING_FORM_LABELS: Record<string, string> = {
   'client-onboarding-legacy': 'Onboarding form (legacy)',
   'kick-off': 'Kick off form',
 };
+
+/**
+ * The tag that starts the onboarding automation (CFT step 22, Hansel 1 Oct 2026).
+ *
+ * Added by the Hub once a tech has set up the practice's sub-account, to the
+ * practice's contact in the onboarding sub-account - the contact that
+ * submitted the onboarding form. A GoHighLevel workflow triggered on this tag
+ * runs the rest. Change the name here if the workflow's trigger changes.
+ */
+export const ONBOARDING_START_TAG = 'auto-onboarding start';
+
+/** Apex's onboarding sub-account, where the onboarding and kick off forms live. */
+export const ONBOARDING_LOCATION_ID = 'GadFUvfBRQPoUbKD3GBr';

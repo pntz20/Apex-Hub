@@ -528,3 +528,19 @@ export async function createLocationUser(
 
   return { userId: created.id ?? created.user?.id ?? null, raw: created };
 }
+
+/**
+ * Adds tags to one contact, leaving its other tags alone.
+ *
+ * POST /contacts/{id}/tags appends; it does not replace. Uses the location's own
+ * token when the location has a clients row (the onboarding sub-account does),
+ * falling back to the agency credential otherwise. Needs contacts.write.
+ */
+export async function addContactTags(
+  clientId: string | null,
+  contactId: string,
+  tags: string[],
+): Promise<void> {
+  const { token } = await locationAuth(clientId);
+  await call(token, 'POST', `/contacts/${encodeURIComponent(contactId)}/tags`, { tags });
+}

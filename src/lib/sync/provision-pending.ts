@@ -14,7 +14,7 @@
  * Safe to run repeatedly. A submission whose account exists is configured rather
  * than duplicated, and a submission already finished is skipped entirely.
  */
-import { AUTO_PROVISION_FROM } from '@/lib/onboarding/auto-provision';
+import { AUTO_PROVISION_ENABLED, AUTO_PROVISION_FROM } from '@/lib/onboarding/auto-provision';
 import {
   adaptGhlOnboarding,
   GHL_ONBOARDING_FORM_KEY,
@@ -48,6 +48,11 @@ const ONBOARDING_FORM_KEYS = [
 const BATCH = 10;
 
 export async function syncProvisionPending(ctx: SyncContext): Promise<void> {
+  if (!AUTO_PROVISION_ENABLED) {
+    ctx.log('Auto-provisioning is off: sub-accounts are set up by a tech from the Provisioning page.');
+    ctx.note('auto_provision', 'disabled');
+    return;
+  }
   const db = serviceClient();
 
   const [submissions, runs, placed] = await Promise.all([

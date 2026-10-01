@@ -1,0 +1,126 @@
+/**
+ * The kick off form (CFT step 22): question -> sub-account custom value.
+ *
+ * Filled in by the account manager on the front desk call, 2-7 days after the
+ * onboarding form, in Apex's onboarding sub-account (form 1SggeGDzW2d72OQ6zYVA,
+ * "Onboarding Questionnaire (Account Manager Use)"). Its answers are what the
+ * new practice's sub-account automations read, so they are written onto that
+ * sub-account's custom values.
+ *
+ * Questions are matched on their text with punctuation and case folded,
+ * because GoHighLevel sends the question label as the key. Custom value names
+ * are the ones read off a snapshot-built account (Dr. Christopher Jones and
+ * Associates, 1 Oct 2026), not guesses.
+ *
+ * Questions with no custom value of their own are not written anywhere; they
+ * stay on the stored submission: Clinic Name, Clinic Website, Doctor Preferred
+ * Name, Patient Delivery Type, Custom Scripting, Comprehensive / Limited Case
+ * Price, Our Internal Appt Reminders, Marketing Platforms Requested and Daily
+ * Ad Budget.
+ */
+
+export const KICKOFF_FORM_KEY = 'kick-off';
+
+/** Question text -> custom value name. */
+const MAP: ReadonlyArray<[question: string, customValue: string]> = [
+  ['Doctor Type', 'Doctor Type'],
+  ['Offer Type', 'Offer type'],
+  ['Scheduling Type', 'Scheduling Type'],
+  ['Scheduling Tutorial Link', 'Scheduling Tutorial Link'],
+  ['Promotion Offer/Offers', 'Offer Name'],
+  ['Sub Offers', 'Sub offers'],
+  ['Custom Phrasing for Doctor/Clinic?', 'custom phrase'],
+  ['Custom Pricing?', 'custom pricing'],
+  [
+    'Insurance Specifics: Direct Billing or Fee for Service?',
+    'Insurance Specifics: Direct Billing or Fee for Service?',
+  ],
+  [
+    'Insurance Specifics: Remainder amount after insurance application, financeable?',
+    'Insurance Specifics: Remainder Financeable after Insurance Applied? (Yes/No)',
+  ],
+  ['Insurance Specifics: In Network Insurances?', 'Insurance Specifics: In network Insurances'],
+  [
+    'Insurance Specifics: Insurance Classes Accepted?',
+    'Insurance Specifics: Insurance Accepted',
+  ],
+  ['In house financing payment terms', 'Inhouse Finance'],
+  ['3rd party financing terms', '3rdparty-Finance'],
+  ['Scheduler', 'Scheduler'],
+  ['Office Text Phone Number', 'Front Desk Notification Phone Number'],
+  ['Office Notification Emails', 'Front Desk Email'],
+  [
+    'New Patient Form automatically sent? If not, do we have the link to their NPF?',
+    'New Patient Form automatically sent? If not, do we have the link to their NPF?',
+  ],
+  ['Address of Clinic/Clinics', 'Location Address'],
+];
+
+/**
+ * Lower-case, letters and digits only, and anything in parentheses dropped -
+ * the form appends "(not needed if completed in Doctor Onboarding Form)" to
+ * some labels and may change that note without changing the question.
+ */
+export function fold(question: string): string {
+  return question
+    .replace(/\([^)]*\)/g, ' ')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, ' ')
+    .trim();
+}
+
+const FOLDED = MAP.map(([question, value]) => [fold(question), value] as const);
+
+function asText(value: unknown): string | null {
+  if (value === null || value === undefined) return null;
+  if (Array.isArray(value)) {
+    const joined = value.map((item) => asText(item)).filter(Boolean).join(', ');
+    return joined === '' ? null : joined;
+  }
+  if (typeof value === 'number' || typeof value === 'boolean') return String(value);
+  if (typeof value !== 'string') return null;
+  const trimmed = value.trim();
+  return trimmed === '' ? null : trimmed;
+}
+
+/**
+ * The custom values a kick off submission fills.
+ *
+ * A question matches when its folded text is a mapped question's folded text or
+ * starts with it, so "In house financing payment terms. Minimum downpayment
+ * amount, Monthly Payment Amounts" lands on Inhouse Finance. Blank answers are
+ * dropped: an empty answer means "not discussed", not "clear the field".
+ */
+export function kickoffValues(answers: Record<string, unknown>): {
+  values: Record<string, string>;
+  unmapped: string[];
+} {
+  const values: Record<string, string> = {};
+  const unmapped: string[] = [];
+
+  for (const [question, raw] of Object.entries(answers)) {
+    const answer = asText(raw);
+    if (answer === null) continue;
+    const folded = fold(question);
+
+    if (folded.startsWith('number of clinics')) {
+      const count = Number.parseInt(answer, 10);
+      if (Number.isFinite(count)) values['Multi / Single Location'] = count > 1 ? 'Multi' : 'Single';
+      continue;
+    }
+
+    const hit = FOLDED.find(([key]) => folded === key || folded.startsWith(`${key} `));
+    if (hit) values[hit[1]] = answer;
+    else unmapped.push(question);
+  }
+
+  return { values, unmapped };
+}
+
+/** The clinic the account manager named, for matching the practice. */
+export function kickoffClinicName(answers: Record<string, unknown>): string | null {
+  for (const [question, raw] of Object.entries(answers)) {
+    if (fold(question) === 'clinic name') return asText(raw);
+  }
+  return null;
+}

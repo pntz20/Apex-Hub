@@ -37,6 +37,8 @@ import {
   GHL_ONBOARDING_FORM_KEY,
   HUB_ONBOARDING_FORM_KEY,
 } from '@/lib/onboarding/ghl-form';
+import { setCustomValues } from '@/lib/integrations/ghl-provision';
+import { KICKOFF_FORM_KEY, kickoffClinicName, kickoffValues } from '@/lib/onboarding/kickoff';
 import { provisionFromSubmission } from '@/lib/onboarding/provision';
 import { serviceClient } from '@/lib/supabase/service';
 
@@ -46,6 +48,7 @@ export const dynamic = 'force-dynamic';
 const ACCEPTED = new Set<string>([
   GHL_ONBOARDING_FORM_KEY,
   HUB_ONBOARDING_FORM_KEY,
+  KICKOFF_FORM_KEY,
 ]);
 
 /** Keys that carry routing rather than an answer, so they stay out of payload. */
@@ -58,6 +61,8 @@ const ENVELOPE = new Set([
   'is_test',
   'location_id',
   'locationId',
+  'contact_id',
+  'contactId',
 ]);
 
 function text(value: unknown): string | null {
@@ -198,6 +203,19 @@ export async function POST(request: NextRequest) {
     }
   }
 
+  const contactCrmId = text(body['contact_id'] ?? body['contactId']);
+  const sourceLocationId = text(body['location_id'] ?? body['locationId']);
+
+  if (formKey === KICKOFF_FORM_KEY) {
+    return handleKickoff(db, {
+      answers,
+      crmSubmissionId,
+      contactCrmId,
+      sourceLocationId,
+      isTest: body['is_test'] === true,
+    });
+  }
+
   // Translate first, so the columns below read the same field names whichever
   // form this came from.
   const normalised =
@@ -240,7 +258,9 @@ export async function POST(request: NextRequest) {
       contact_phone: contactPhone,
       submitted_at: submittedAt,
       is_test: body['is_test'] === true,
-      source_location_id: text(body['location_id'] ?? body['locationId']),
+      source_location_id: sourceLocationId,
+      // Who to tag "auto-onboarding start" on once the sub-account is set up.
+      contact_crm_id: contactCrmId,
     })
     .select('id')
     .maybeSingle();
@@ -294,4 +314,136 @@ export async function POST(request: NextRequest) {
     { ok: true, submissionId, matched: match.method, provisioned },
     { status: 200 },
   );
+}
+
+/**
+ * The kick off form (CFT step 22): store it, then write its answers onto the
+ * practice's sub-account custom values.
+ *
+ * Which practice: the onboarding submission from the same contact first (the
+ * account manager submits from the practice's contact), then an exact clinic
+ * name match. Nothing fuzzy - a wrong match writes one practice's pricing into
+ * another's automations. Unmatched submissions are stored and reported, and the
+ * values can be written later by hand.
+ */
+async function handleKickoff(
+  db: ReturnType<typeof serviceClient>,
+  input: {
+    answers: Record<string, unknown>;
+    crmSubmissionId: string | null;
+    contactCrmId: string | null;
+    sourceLocationId: string | null;
+    isTest: boolean;
+  },
+) {
+  const clinicName = kickoffClinicName(input.answers);
+  let groupId: string | null = null;
+  let locationId: string | null = null;
+
+  if (input.contactCrmId) {
+    const onboarding = await db
+      .from('form_submissions')
+      .select('id, client_group_id')
+      .eq('contact_crm_id', input.contactCrmId)
+      .neq('form_key', KICKOFF_FORM_KEY)
+      .order('submitted_at', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    if (onboarding.data) {
+      groupId = onboarding.data.client_group_id;
+      const run = await db
+        .from('provisioning_runs')
+        .select('crm_location_id')
+        .eq('submission_id', onboarding.data.id)
+        .not('crm_location_id', 'is', null)
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      locationId = run.data?.crm_location_id ?? null;
+    }
+  }
+
+  if (!groupId && clinicName) {
+    const match = await matchGroup(db, null, clinicName);
+    groupId = match.groupId;
+  }
+
+  let clientId: string | null = null;
+  if (groupId) {
+    const locations = await db
+      .from('clients')
+      .select('id, crm_location_id')
+      .eq('group_id', groupId)
+      .not('crm_location_id', 'is', null)
+      .limit(2);
+    const rows = locations.data ?? [];
+    const chosen = locationId ? rows.find((row) => row.crm_location_id === locationId) : rows.length === 1 ? rows[0] : undefined;
+    if (chosen) {
+      clientId = chosen.id;
+      locationId = chosen.crm_location_id;
+    }
+  }
+
+  const written = await db
+    .from('form_submissions')
+    .insert({
+      form_key: KICKOFF_FORM_KEY,
+      crm_submission_id: input.crmSubmissionId,
+      client_group_id: groupId,
+      match_method: groupId ? 'exact' : null,
+      payload: input.answers as never,
+      clinic_name: clinicName,
+      contact_crm_id: input.contactCrmId,
+      source_location_id: input.sourceLocationId,
+      submitted_at: new Date().toISOString(),
+      is_test: input.isTest,
+    })
+    .select('id')
+    .maybeSingle();
+  if (written.error) {
+    return NextResponse.json({ error: written.error.message }, { status: 500 });
+  }
+
+  const { values, unmapped } = kickoffValues(input.answers);
+
+  if (!locationId || input.isTest) {
+    return NextResponse.json(
+      {
+        ok: true,
+        submissionId: written.data?.id ?? null,
+        kickoff: input.isTest ? 'test, not written' : 'stored; no set-up sub-account matched',
+        valuesReady: Object.keys(values).length,
+        unmapped,
+      },
+      { status: 200 },
+    );
+  }
+
+  try {
+    const result = await setCustomValues(clientId, locationId, values);
+    return NextResponse.json(
+      {
+        ok: true,
+        submissionId: written.data?.id ?? null,
+        kickoff: 'written',
+        locationId,
+        written: result.written,
+        missing: result.missing,
+        failed: result.failed,
+        unmapped,
+      },
+      { status: 200 },
+    );
+  } catch (error) {
+    // Stored either way; a 200 so Make does not resend a saved submission.
+    return NextResponse.json(
+      {
+        ok: true,
+        submissionId: written.data?.id ?? null,
+        kickoff: 'stored; writing values failed',
+        error: error instanceof Error ? error.message : String(error),
+      },
+      { status: 200 },
+    );
+  }
 }

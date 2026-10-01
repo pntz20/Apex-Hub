@@ -21,13 +21,21 @@ export function RetryProvisioning({
   runId,
   submissionId,
   disabled = false,
+  needsLocation = false,
 }: {
   /** A previous attempt to repeat. Omit for a submission never attempted. */
   runId?: string;
   /** A submission with no attempt yet. */
   submissionId?: string;
   disabled?: boolean;
+  /**
+   * No sub-account yet: show a box for the location id of the one the tech
+   * built by hand from the snapshot (CFT step 22 - the Hub no longer creates
+   * them; HighLevel only allows that on Agency Pro).
+   */
+  needsLocation?: boolean;
 }) {
+  const [locationId, setLocationId] = useState('');
   const [result, setResult] = useState<RetryResult | null>(null);
   const [pending, startTransition] = useTransition();
 
@@ -35,16 +43,25 @@ export function RetryProvisioning({
 
   return (
     <div className="shrink-0 text-right">
+      {needsLocation ? (
+        <input
+          value={locationId}
+          onChange={(event) => setLocationId(event.target.value)}
+          placeholder="HighLevel location id or URL"
+          aria-label="HighLevel location id of the sub-account built from the snapshot"
+          className="mb-1.5 block w-56 rounded-md border border-line bg-surface px-2 py-1 text-xs text-fg"
+        />
+      ) : null}
       <button
         type="button"
-        disabled={disabled || pending}
+        disabled={disabled || pending || (needsLocation && locationId.trim() === '')}
         onClick={() =>
           startTransition(async () => {
             setResult(
               runId !== undefined
-                ? await retryProvisioning({ runId })
+                ? await retryProvisioning({ runId, locationId })
                 : submissionId !== undefined
-                  ? await provisionSubmission({ submissionId })
+                  ? await provisionSubmission({ submissionId, locationId })
                   : {
                       ok: false,
                       message: 'Nothing to build from.',
@@ -62,7 +79,7 @@ export function RetryProvisioning({
         className="inline-flex items-center gap-1.5 rounded-md border border-line px-2.5 py-1.5 text-xs text-fg-muted transition-colors hover:bg-surface-hover hover:text-fg disabled:opacity-50"
       >
         <RotateCw size={12} className={pending ? 'animate-spin' : undefined} />
-        {pending ? 'Building…' : isFirstAttempt ? 'Provision' : 'Retry'}
+        {pending ? 'Setting up…' : needsLocation ? 'Set up' : isFirstAttempt ? 'Provision' : 'Retry'}
       </button>
 
       {result ? (

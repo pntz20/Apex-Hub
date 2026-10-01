@@ -180,6 +180,7 @@ export default async function ProvisioningPage() {
                 <RetryProvisioning
                   submissionId={row.id}
                   disabled={row.clinic_name === null}
+                  needsLocation
                 />
               </li>
             ))}
@@ -246,6 +247,7 @@ export default async function ProvisioningPage() {
                     <RetryProvisioning
                       runId={row.id}
                       disabled={row.submission_id === null}
+                      needsLocation={!row.crm_location_id}
                     />
                   ) : null}
                 </div>

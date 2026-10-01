@@ -18,8 +18,10 @@ import {
   derivedCustomValues,
   nameCustomValues,
 } from '@/config/provisioning';
+import { ONBOARDING_LOCATION_ID, ONBOARDING_START_TAG } from '@/config/onboarding';
 import {
   GhlWriteError,
+  addContactTags,
   createLocationUser,
   createSubAccount,
   setCustomValues,
@@ -425,6 +427,17 @@ export async function provisionFromSubmission(input: {
       }
     }
 
+    /*
+     * Start the onboarding automation (CFT step 22).
+     *
+     * The tag goes on the practice's contact in the onboarding sub-account - the
+     * one that submitted the onboarding form - and a GoHighLevel workflow on that
+     * tag does the rest. Only once the sub-account has its values, so the
+     * automation never runs against an empty account. Not fatal: the account is
+     * still good without it, and the reason is on the run row.
+     */
+    const tagNote = await tagOnboardingContact(input.submissionId);
+
     const status: ProvisionOutcome['status'] =
       outcome.failed.length > 0 || unexpectedMissing.length > 0
         ? 'partial'
@@ -441,9 +454,14 @@ export async function provisionFromSubmission(input: {
       // created, the sub-account exists and the practice is still missing from
       // the Hub, which nobody would notice from a green tick.
       error:
-        ctxNote === null
-          ? undefined
-          : `Sub-account configured, but it could not be registered as a client: ${ctxNote}`,
+        [
+          ctxNote === null
+            ? null
+            : `Sub-account configured, but it could not be registered as a client: ${ctxNote}`,
+          tagNote.ok ? null : tagNote.message,
+        ]
+          .filter(Boolean)
+          .join(' ') || undefined,
     });
 
     return {
@@ -471,7 +489,8 @@ export async function provisionFromSubmission(input: {
               : '') +
         (outcome.failed.length > 0
           ? ` ${outcome.failed.length} were refused.`
-          : ''),
+          : '') +
+        ` ${tagNote.message}`,
     };
   } catch (error) {
     const scope = error instanceof GhlWriteError && error.isScopeProblem;
@@ -519,6 +538,54 @@ export async function provisionFromSubmission(input: {
         : `The sub-account was created (${locationId}) but its custom values were ` +
           `not written: ${detail}. Retry configures that same account rather than ` +
           'creating another.',
+    };
+  }
+}
+
+/**
+ * Adds ONBOARDING_START_TAG to the contact behind an onboarding submission.
+ *
+ * The contact lives in the sub-account the form was submitted in (Apex's
+ * onboarding sub-account unless the submission says otherwise). Returns a
+ * sentence for the run either way, because "the tag was not added" is the one
+ * thing a tech needs to know to start the automation by hand.
+ */
+export async function tagOnboardingContact(
+  submissionId: string | null,
+): Promise<{ ok: boolean; message: string }> {
+  if (!submissionId) {
+    return { ok: false, message: `No submission, so the "${ONBOARDING_START_TAG}" tag was not added.` };
+  }
+  const db = serviceClient();
+  const submission = await db
+    .from('form_submissions')
+    .select('contact_crm_id, source_location_id')
+    .eq('id', submissionId)
+    .maybeSingle();
+  if (submission.error || !submission.data) {
+    return { ok: false, message: `Could not read the submission, so the "${ONBOARDING_START_TAG}" tag was not added.` };
+  }
+  const contactId = submission.data.contact_crm_id;
+  if (!contactId) {
+    return {
+      ok: false,
+      message:
+        `The submission carries no contact id, so add the "${ONBOARDING_START_TAG}" tag ` +
+        'to the practice contact in the onboarding sub-account by hand.',
+    };
+  }
+  const locationId = submission.data.source_location_id ?? ONBOARDING_LOCATION_ID;
+  const owner = await db.from('clients').select('id').eq('crm_location_id', locationId).maybeSingle();
+  try {
+    await addContactTags(owner.data?.id ?? null, contactId, [ONBOARDING_START_TAG]);
+    return { ok: true, message: `Tagged "${ONBOARDING_START_TAG}" to start the onboarding automation.` };
+  } catch (error) {
+    return {
+      ok: false,
+      message:
+        `The "${ONBOARDING_START_TAG}" tag could not be added (` +
+        (error instanceof Error ? error.message : String(error)) +
+        '), so add it by hand to start the onboarding automation.',
     };
   }
 }
