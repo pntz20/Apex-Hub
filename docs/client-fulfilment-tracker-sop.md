@@ -3,7 +3,8 @@
 How it is built, how to add a client, and how to work out what is wrong when a
 number looks off.
 
-Last updated 14 September 2026.
+Last updated 1 October 2026. (14 Sep original; 1 Oct: Revenue/ROI, Offer Name,
+ad attribution from UTM names, current sync schedule.)
 
 ---
 
@@ -55,15 +56,26 @@ the time it was written.
 | CRM appointments | `crm-appointments` | `appointments`, `appointment_ledger` | Appointments the sheet never recorded |
 | Call-centre dial log (HotProspector, via the call-centre workbook's RAW DATA tab) | `raw-call-rows` | `raw_call_rows` | Dials, pickups, conversations |
 | CRM calls | `crm-calls` | `calls` | Fallback for days the dial log has no rows |
+| CRM leads (GoHighLevel contacts, last 14 days) | `crm-leads` | `crm_leads` | Lead attribution (UTMs, campaign / ad set / ad), lead reconciliation |
 | CRM leads + either call feed | (view `v_lead_speed_to_lead`) | — | Speed to lead |
 
-### When they run
+### When they run (UTC, from `vercel.json`)
 
 | Schedule | What |
 |---|---|
-| `0 6 * * *` | `sync-all` — every feed above, in dependency order |
-| `0 18 * * *` | `crm-appointments` again |
+| `0 6 * * *` | `sync-all`: every feed above, in dependency order, `crm-clients` first |
+| `30 6 * * *` | `crm-leads` on its own (since 1 Oct; see below) |
+| `0 18 * * *` | `crm-appointments` again (full) |
 | `0 13,16,19,22 * * *` | `raw-call-rows` (call centre pay, and this tracker's call columns since migration 0096) |
+| `*/15 * * * *` | `sync-live`: ISR sheet, stat sheets, ledger |
+| `0 * * * *` | `windsor-ads` (spend) |
+| `30 * * * *` | `sync-appointments` (new GoHighLevel bookings) |
+
+**Why crm-leads has its own slot.** `sync-all` has a 300 s limit and a 240 s
+start budget. `crm-leads` is last in its order, and on a slow day (booking-sheet
+alone took ~3 minutes on 30 Sep) it never starts. The 06:30 run makes sure it
+runs daily whatever happens to the cycle. Any single sync can also be run by
+hand from **Settings → Syncs → Run now** (`/api/sync/<name>`).
 
 Order inside `sync-all` matters: `crm-clients` runs first so a new practice has
 a client row before anything tries to attach data to it.
@@ -90,7 +102,7 @@ but a mean of two CPLs treats them as though they did.
 | Client Name | `clients.name` |
 | Campaign Name | `campaigns.name` |
 | Campaign ID | The sheet's campaign id |
-| Offer Name | Most common offer on that client's appointments |
+| Offer Name | Most common offer on that client's appointments. When none is recorded, taken from the campaign name: the segment carrying a price or discount (`$2000 Off`, `Free`, `All in`), else a treatment word (Invisalign, braces, aligners, implants). `$xxxx` placeholders and " - Copy" are ignored |
 
 ### 1. Ad data (G–I)
 
@@ -159,8 +171,11 @@ not a mistake. See §6.
 |---|---|
 | Closes | Appointments marked Closed |
 | Close % | Closes ÷ shows |
-| Revenue | **Not recorded anywhere.** Always blank |
-| ROI | Needs revenue. Always blank |
+| Revenue | Σ treatment value from the practices' stat sheets (`revenue_cents`, migration 0095) |
+| ROI | Revenue ÷ spend, shown as `2.01x`. Blank when there is no revenue or no spend |
+
+Revenue is only as complete as the stat sheets' treatment value column. A
+practice that doesn't fill it in shows no revenue, not zero.
 | Cost Per Booking | Spend ÷ appointments created |
 | Cost Per Show | Spend ÷ shows |
 | Cost Per Close | Spend ÷ closes |
@@ -499,7 +514,7 @@ Work down this list:
 npm run check:cft
 ```
 
-68 assertions over the tracker's arithmetic — column letters, section spans,
+95 assertions over the tracker's arithmetic — column letters, section spans,
 which columns hatch at which grain, and every derived rate. Run it after any
 change to `cft-stats.ts` or `cft-columns.ts`.
 
@@ -508,20 +523,60 @@ Related suites: `check:tracker`, `check:commission`, `check:pay`,
 
 ---
 
-## 8. Known limitations
+## 8. Ad attribution: how a lead or booking gets its ad
 
-**No ad can be traced to a booking.** All 1,443 appointments carry an empty ad
-id, and so does every row from the tracker. The only ad attribution anywhere is
-on tracker leads, where 480 of 1,101 resolvable rows name an ad belonging to a
-*different* practice.
+### The UTM string (on every live ad since 29 Sep 2026)
 
-This is the binding constraint on creative testing. Hook/body/CTA combinations
-can be measured on clicks and cost, and cannot be measured on bookings, until
-something stamps the ad id onto the appointment. It is a tracker change, and it
-is far cheaper to start recording now than to backfill later.
+Set in each ad's **URL parameters** field in Ads Manager (not in the website
+URL, where Meta doesn't expand the macros):
 
-**Revenue and ROI are permanently blank** until case values are recorded
-somewhere.
+```
+utm_source=fb&utm_campaign={{campaign.name}}&utm_medium={{adset.name}}&utm_content={{ad.name}}&utm_term={{adset.id}}&campaign_id={{campaign.id}}&adset_id={{adset.id}}&ad_id={{ad.id}}&utm_id={{campaign.id}}
+```
+
+`utm_id` matters for the Google Sheets backup: the "01 - PPS - New Appointment
+Booked" Make scenarios read the campaign id from `utm_id=`, and stop at that
+step when it is missing. Ultra Smiles has it; the 29 Sep rollout elsewhere did
+not include it, so either add it to those ads or change the scenarios' parser to
+`[?&](?:utm_id|campaign_id)=([^&]+)`.
+
+### What HighLevel keeps, and how the Hub fills the rest
+
+HighLevel keeps `utm_campaign`, `utm_medium`, `utm_content` and `utm_term` on
+the contact, but drops the `campaign_id` / `adset_id` / `ad_id` parameters. So a
+trigger on `crm_leads` and `appointments` (`fill_ad_ids_from_names`) fills the
+ids in:
+
+1. **By name (0102).** The campaign, ad set and ad names are matched,
+   normalised, against that practice's own synced campaigns, ad sets and ads.
+   Only a unique match counts. An id HighLevel did send is never replaced.
+2. **Renamed campaign (0103).** If the campaign name matches nothing and the
+   practice had exactly **one** campaign spending in the 30 days up to the
+   lead or booking, that campaign is used. Campaign level only; ad set and ad
+   are never guessed. Practices running two or more campaigns get nothing.
+
+Rows filled either way are flagged `ad_ids_from_names = true`.
+
+Measured 30 Sep: UTM-tagged leads since 16 Sep, 639 of 665 have a campaign
+and 394 an ad (was 0 before 0102). Leads since 29 Sep: 79 of 104 have an ad.
+The rest are mostly practices with several live campaigns and leads whose
+`utm_campaign` is a literal `{{campaign.name}}`. Those are organic shares of
+an ad link, not a setup fault.
+
+### If a practice's leads have no ad ids
+
+1. Check the ad's URL parameters in Ads Manager match the string above.
+2. Check the practice's ads are syncing (the Windsor account is mapped and
+   returns data). The name match needs the ad in the `ads` table.
+3. Run `crm-leads` from Settings. The trigger fills the row on write.
+
+## 9. Known limitations
+
+**Revenue depends on the stat sheets.** See §3.
+
+**Bookings from before 29 Sep 2026 mostly carry no ad.** The UTM string
+didn't exist yet, so they can't be traced to an ad, only to a campaign by the
+rule in §5b.
 
 **Campaign-grain reporting is unavailable** for anything sheet-sourced, because
 the sheet's campaign id is cross-contaminated. Fixing that means fixing the
