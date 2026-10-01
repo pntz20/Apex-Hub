@@ -740,6 +740,29 @@ check(
   35000,
 );
 
+section('Step 10: matched calls go to their campaign, the rest by lead share');
+{
+  const rows = [
+    stat({ campaign_id_external: '111', leads_best: 1 }),
+    stat({ campaign_id_external: '222', campaign_name: 'Braces', leads_best: 3 }),
+  ];
+  const dials = [call({ dialed_calls: 100, calls_2min: 8 })];
+  const matched = [
+    { client_id: 'c1', campaign_external_id: '111', day: '2026-09-20', dialed_calls: 40, calls_2min: 6, calls_2min_outbound: 0, connected_outbound: 0, answered_outbound: 0, connected_but_silent: 0 },
+  ];
+  const result = aggregate(rows, dials, campaign, matched);
+  const byId = new Map(result.rows.map((r) => [r.campaignId, r]));
+  // 60 unmatched split 1:3 -> 15 / 45; campaign 111 also gets its 40 matched.
+  check('matched campaign gets its own calls plus its share', byId.get('111')!.calls!.dialed, 55);
+  check('the other campaign gets only its share', byId.get('222')!.calls!.dialed, 45);
+  check('rows still sum to the practice total', byId.get('111')!.calls!.dialed + byId.get('222')!.calls!.dialed, 100);
+  check('long calls follow the same rule', byId.get('111')!.calls!.calls2min + byId.get('222')!.calls!.calls2min, 8);
+  const over = aggregate(rows, [call({ dialed_calls: 10 })], campaign, [{ ...matched[0]!, dialed_calls: 25 }]);
+  check('a match never claims more than the practice has', over.rows.reduce((t, r) => t + (r.calls?.dialed ?? 0), 0), 10);
+  check('and nothing goes negative', over.rows.every((r) => (r.calls?.dialed ?? 0) >= 0), true);
+  check('without matches it is the old lead-share split', aggregate(rows, dials, campaign).rows.find((r) => r.campaignId === '111')!.calls!.dialed, 25);
+}
+
 section('Outcome detail (step 14) sums like the other counters');
 {
   const both = aggregate(

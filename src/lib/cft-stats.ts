@@ -313,6 +313,19 @@ export interface CallViewRow {
   speed_to_lead_over_24h: number | null;
 }
 
+/** Dials matched to a campaign through the lead's phone (0108, CFT step 10). */
+export interface CampaignCallRow {
+  client_id: string | null;
+  campaign_external_id: string | null;
+  day: string;
+  dialed_calls: number | null;
+  calls_2min: number | null;
+  calls_2min_outbound: number | null;
+  connected_outbound: number | null;
+  answered_outbound: number | null;
+  connected_but_silent: number | null;
+}
+
 const n = (value: number | null): number => value ?? 0;
 
 function emptyCalls(): CallCounters {
@@ -439,7 +452,18 @@ export async function loadStatsDashboard(
     ),
   ]);
 
-  return { ...aggregate(stats, calls, options), from, to };
+  /*
+   * Step 10's match, campaign grain only. A failure (the function missing
+   * before 0108 is applied, say) falls back to the old lead-share split
+   * rather than taking the tracker down.
+   */
+  let matched: CampaignCallRow[] = [];
+  if (options.breakdown === 'campaign') {
+    const result = await db.rpc('cft_call_campaign_daily', { p_from: from, p_to: to });
+    if (!result.error && Array.isArray(result.data)) matched = result.data as CampaignCallRow[];
+  }
+
+  return { ...aggregate(stats, calls, options, matched), from, to };
 }
 
 /**
@@ -484,6 +508,7 @@ export function aggregate(
   stats: StatsViewRow[],
   calls: CallViewRow[],
   options: { breakdown: Breakdown; clientId?: string | undefined },
+  matched: CampaignCallRow[] = [],
 ): Omit<DashboardResult, 'from' | 'to'> {
   // Every client in either feed, so the filter and the client breakdown both
   // include the call-only ones.
@@ -513,6 +538,21 @@ export function aggregate(
     held.speedToLeadN += n(row.speed_to_lead_n);
     held.speedToLeadOver24h += n(row.speed_to_lead_over_24h);
     callsByClient.set(row.client_id, held);
+  }
+
+  const matchedByClient = new Map<string, Map<string, CallCounters>>();
+  for (const row of matched) {
+    if (!row.client_id || !row.campaign_external_id || !keep(row.client_id)) continue;
+    const byCampaign = matchedByClient.get(row.client_id) ?? new Map<string, CallCounters>();
+    const held = byCampaign.get(row.campaign_external_id) ?? emptyCalls();
+    held.dialed += n(row.dialed_calls);
+    held.calls2min += n(row.calls_2min);
+    held.calls2minOutbound += n(row.calls_2min_outbound);
+    held.connectedOutbound += n(row.connected_outbound);
+    held.answeredOutbound += n(row.answered_outbound);
+    held.connectedButSilent += n(row.connected_but_silent);
+    byCampaign.set(row.campaign_external_id, held);
+    matchedByClient.set(row.client_id, byCampaign);
   }
 
   const byKey = new Map<string, DashboardRow>();
@@ -678,12 +718,48 @@ export function aggregate(
         });
         continue;
       }
+      /*
+       * Matched first (step 10): dials whose lead's campaign is one of this
+       * practice's rows go to that row as counted. Only what is left - calls
+       * to numbers with no campaign, and every speed-to-lead figure - is
+       * spread by lead share as before, so the rows still sum to the
+       * practice's real total.
+       */
+      const own = matchedByClient.get(clientId);
+      const exact = list.map((row) => {
+        const hit = row.campaignId ? own?.get(row.campaignId) : undefined;
+        return hit ? { ...hit } : emptyCalls();
+      });
+      const remainder = { ...counters };
+      for (const piece of exact) {
+        for (const key of Object.keys(remainder) as Array<keyof CallCounters>) {
+          remainder[key] -= piece[key];
+        }
+      }
+      // A match can only claim calls the practice total has; never go negative.
+      for (const key of Object.keys(remainder) as Array<keyof CallCounters>) {
+        if (remainder[key] < 0) {
+          let over = -remainder[key];
+          remainder[key] = 0;
+          for (const piece of exact) {
+            if (over <= 0) break;
+            const take = Math.min(piece[key], over);
+            piece[key] -= take;
+            over -= take;
+          }
+        }
+      }
       let weights = list.map((row) => row.leads);
       if (weights.every((w) => w === 0)) weights = list.map((row) => row.spendCents);
       if (weights.every((w) => w === 0)) weights = list.map(() => 1);
-      const shares = apportion(counters, weights);
+      const shares = apportion(remainder, weights);
       list.forEach((row, index) => {
-        row.calls = shares[index];
+        const share = shares[index] ?? emptyCalls();
+        const piece = exact[index] ?? emptyCalls();
+        for (const key of Object.keys(share) as Array<keyof CallCounters>) {
+          share[key] += piece[key];
+        }
+        row.calls = share;
       });
     }
   }
