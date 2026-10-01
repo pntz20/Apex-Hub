@@ -55,6 +55,16 @@ export function speakerFor(channelId: string): Speaker {
   return isDirectMessage(channelId) ? 'user' : 'bot';
 }
 
+/** Web API read methods that do not accept a JSON body. See call(). */
+const FORM_METHODS = new Set([
+  'users.info',
+  'conversations.info',
+  'conversations.replies',
+  'conversations.history',
+  'chat.getPermalink',
+  'auth.test',
+]);
+
 /**
  * One POST to a Web API method, or null.
  *
@@ -80,14 +90,32 @@ async function call(
     return null;
   }
 
+  /*
+   * Read methods get a form body. Slack ignores a JSON body on them without
+   * saying so: users.info then answers user_not_found, conversations.info
+   * channel_not_found, conversations.replies invalid_arguments. That is why
+   * every ticket's raised_by_name was a Slack id and channel name and
+   * permalink were always null (found 1 Oct 2026). Write methods
+   * (chat.postMessage, reactions.add) take JSON and stay on it.
+   */
+  const asForm = FORM_METHODS.has(method);
+  const formBody = new URLSearchParams(
+    Object.entries(body).map(([key, value]) => [
+      key,
+      typeof value === 'string' ? value : JSON.stringify(value),
+    ]),
+  ).toString();
+
   try {
     const response = await fetch(`${API_BASE}/${method}`, {
       method: 'POST',
       headers: {
         Authorization: `Bearer ${token}`,
-        'Content-Type': 'application/json; charset=utf-8',
+        'Content-Type': asForm
+          ? 'application/x-www-form-urlencoded'
+          : 'application/json; charset=utf-8',
       },
-      body: JSON.stringify(body),
+      body: asForm ? formBody : JSON.stringify(body),
     });
 
     const payload = (await response.json()) as SlackResponse;

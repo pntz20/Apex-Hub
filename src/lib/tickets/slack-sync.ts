@@ -24,6 +24,7 @@
 import {
   botUserId as fetchBotUserId,
   downloadSlackFile,
+  lookupChannelName,
   lookupUser,
   threadMessages,
   type SlackFile,
@@ -33,6 +34,9 @@ import { ALLOWED_TYPES, MAX_BYTES, attachToTicket } from '@/lib/tickets/attachme
 import { serviceClient } from '@/lib/supabase/service';
 
 const UNIQUE_VIOLATION = '23505';
+
+/** A bare Slack user id, which is what got stored when users.info failed. */
+const SLACK_ID = /^[UW][A-Z0-9]{6,}$/;
 
 /** Reply subtypes that are a person talking. Joins, bot posts, edits are not. */
 const HUMAN_SUBTYPES = new Set<string | null>([null, 'file_share', 'thread_broadcast']);
@@ -231,11 +235,24 @@ export async function recordSlackReply(input: {
     }
     const existing = await db
       .from('tech_ticket_comments')
-      .select('id')
+      .select('id, author_name')
       .eq('ticket_id', input.ticketId)
       .eq('slack_message_ts', message.ts)
       .maybeSingle();
     commentId = existing.data?.id ?? null;
+
+    // Imported while users.info was failing: put the real name on it now.
+    if (
+      commentId &&
+      existing.data?.author_name &&
+      SLACK_ID.test(existing.data.author_name) &&
+      !SLACK_ID.test(author.name)
+    ) {
+      await db
+        .from('tech_ticket_comments')
+        .update({ author_name: author.name, author_id: author.hubUserId })
+        .eq('id', commentId);
+    }
   } else {
     created = true;
     commentId = inserted.data.id;
@@ -287,7 +304,9 @@ export async function syncTicketFromSlack(
 
   const ticket = await db
     .from('tech_tickets')
-    .select('id, raised_by, raised_by_name, slack_channel_id, slack_thread_ts, slack_message_ts')
+    .select(
+      'id, raised_by, raised_by_name, slack_channel_id, slack_channel_name, slack_thread_ts, slack_message_ts',
+    )
     .eq('id', ticketId)
     .maybeSingle();
 
@@ -306,6 +325,26 @@ export async function syncTicketFromSlack(
 
   const result: ThreadSync = { ok: true, ...empty };
   const botUserId = await ownBotUserId();
+
+  /*
+   * Tickets filed while users.info / conversations.info were failing have a
+   * Slack id for the raiser and no channel name. Fill them in once.
+   */
+  const patch: { raised_by_name?: string; raised_by?: string | null; slack_channel_name?: string } = {};
+  if (row.raised_by_name && SLACK_ID.test(row.raised_by_name)) {
+    const raiser = await person(people, row.raised_by_name);
+    if (!SLACK_ID.test(raiser.name)) {
+      patch.raised_by_name = raiser.name;
+      if (!row.raised_by && raiser.hubUserId) patch.raised_by = raiser.hubUserId;
+    }
+  }
+  if (!row.slack_channel_name) {
+    const channelName = await lookupChannelName(row.slack_channel_id);
+    if (channelName) patch.slack_channel_name = channelName;
+  }
+  if (Object.keys(patch).length > 0) {
+    await db.from('tech_tickets').update(patch).eq('id', row.id);
+  }
 
   for (const message of messages) {
     // The message that raised the ticket: its text is the ticket body already,
