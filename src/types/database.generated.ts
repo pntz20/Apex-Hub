@@ -675,6 +675,7 @@ export type Database = {
           utm_source: string | null
           utm_term: string | null
           value_cents: number | null
+          slack_alerted_at: string | null
         }
         Insert: {
           ad_external_id?: string | null
@@ -726,6 +727,7 @@ export type Database = {
           utm_source?: string | null
           utm_term?: string | null
           value_cents?: number | null
+          slack_alerted_at?: string | null
         }
         Update: {
           ad_external_id?: string | null
@@ -777,6 +779,7 @@ export type Database = {
           utm_source?: string | null
           utm_term?: string | null
           value_cents?: number | null
+          slack_alerted_at?: string | null
         }
         Relationships: [
           {

@@ -22,6 +22,7 @@
     "check:commission": "tsx scripts/check-isa-commission.ts",
     "check:pay": "tsx scripts/check-agent-pay.ts",
     "check:cft": "tsx scripts/check-cft-stats.ts",
+    "check:booking-alerts": "tsx scripts/check-booking-alerts.ts",
     "check:googlekey": "tsx scripts/check-google-key.ts",
     "check:leads": "tsx scripts/check-lead-columns.ts",
     "check:autoreply": "tsx scripts/check-autoreply.ts",

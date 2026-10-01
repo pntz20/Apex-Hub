@@ -46,6 +46,7 @@ export async function GET(request: NextRequest) {
 
   const appointments = findSync('crm-appointments');
   const ledger = findSync('appointment-ledger');
+  const alerts = findSync('booking-alerts');
   if (!appointments || !ledger) {
     return NextResponse.json(
       { error: 'crm-appointments or appointment-ledger missing from the sync registry' },
@@ -69,6 +70,14 @@ export async function GET(request: NextRequest) {
     results.push({
       name: ledger.name,
       result: await runSync(ledger.name, 'cron', ledger.run),
+    });
+  }
+
+  // CFT step 16: announce bookings this pass picked up. Seconds, not minutes.
+  if (alerts && Date.now() - startedAt < 285_000) {
+    results.push({
+      name: alerts.name,
+      result: await runSync(alerts.name, 'cron', alerts.run),
     });
   }
 

@@ -4,6 +4,7 @@
  * on the command line — which is exactly when you need to run it by hand.
  */
 import { syncAppointmentLedger } from '@/lib/sync/appointment-ledger';
+import { syncBookingAlerts } from '@/lib/sync/booking-alerts';
 import { syncCrmAppointments } from '@/lib/sync/crm-appointments';
 import { syncCrmCalls } from '@/lib/sync/crm-calls';
 import { syncCrmClients } from '@/lib/sync/crm-clients';
@@ -176,6 +177,13 @@ export const SYNCS: Record<string, SyncDefinition> = {
       'One row per appointment, reconciled across both feeds — and the daily ' +
       'exception list that comes out of it',
     run: syncAppointmentLedger,
+  },
+  'booking-alerts': {
+    name: 'booking-alerts',
+    description:
+      'New bookings from the last three hours posted to #isr-wins - practice, ' +
+      'agent, first name and last initial, time, campaign, deposit. No contact details',
+    run: syncBookingAlerts,
   },
 };
 
