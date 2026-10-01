@@ -87,6 +87,7 @@ export function ClientEditor({
           signedOn: String(form.get('signed_on') ?? ''),
           startedOn: String(form.get('started_on') ?? ''),
           portalEnabled: form.get('portal_enabled') === 'on',
+          isOrtho: form.get('is_ortho') === 'on',
         }),
       );
     });
@@ -266,6 +267,15 @@ export function ClientEditor({
               defaultChecked={group.portal_enabled}
             />
             Portal link active
+          </label>
+
+          <label className="flex items-center gap-2 text-sm text-fg">
+            <input
+              type="checkbox"
+              name="is_ortho"
+              defaultChecked={group.is_ortho}
+            />
+            Ortho practice (shows the FAQ tab in their portal)
           </label>
 
           <div className="flex justify-end">

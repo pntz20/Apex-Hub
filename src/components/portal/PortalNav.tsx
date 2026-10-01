@@ -12,13 +12,19 @@ import { cn } from '@/lib/cn';
  * The token stays in the path on every link, because it is the credential —
  * there is no session carrying it between pages.
  */
-export function PortalNav({ token }: { token: string }) {
+export function PortalNav({
+  token,
+  isOrtho,
+}: {
+  token: string;
+  isOrtho: boolean;
+}) {
   const pathname = usePathname();
   const base = `/portal/${token}`;
 
   return (
     <nav className="mb-8 flex flex-wrap gap-1.5 border-b border-line pb-3">
-      {PORTAL_PAGES.map((page) => {
+      {PORTAL_PAGES.filter((page) => !page.orthoOnly || isOrtho).map((page) => {
         const href = `${base}${page.href}`;
         const active =
           page.href === ''

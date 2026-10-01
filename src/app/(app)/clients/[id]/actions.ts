@@ -72,6 +72,7 @@ export async function updateClientGroup(input: {
   signedOn: string;
   startedOn: string;
   portalEnabled: boolean;
+  isOrtho: boolean;
 }): Promise<SaveResult> {
   await requireAdmin();
 
@@ -132,6 +133,7 @@ export async function updateClientGroup(input: {
       started_on: startedOn,
       churned_on: churnedOn,
       portal_enabled: input.portalEnabled,
+      is_ortho: input.isOrtho,
     })
     .eq('id', input.groupId);
 

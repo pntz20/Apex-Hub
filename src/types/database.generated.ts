@@ -2153,6 +2153,7 @@ export type Database = {
           details_updated_at: string | null
           id: string
           is_internal: boolean
+          is_ortho: boolean
           launch_call_at: string | null
           name: string
           onboarding_added_at: string
@@ -2190,6 +2191,7 @@ export type Database = {
           details_updated_at?: string | null
           id?: string
           is_internal?: boolean
+          is_ortho?: boolean
           launch_call_at?: string | null
           name: string
           onboarding_added_at?: string
@@ -2227,6 +2229,7 @@ export type Database = {
           details_updated_at?: string | null
           id?: string
           is_internal?: boolean
+          is_ortho?: boolean
           launch_call_at?: string | null
           name?: string
           onboarding_added_at?: string

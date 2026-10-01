@@ -24,6 +24,8 @@ export interface PortalContext {
     currency: string;
     onboardingStage: string;
     status: string;
+    /** Ortho practices also get the FAQ tab. */
+    isOrtho: boolean;
   };
   locations: PortalLocation[];
   locationIds: string[];
@@ -38,7 +40,9 @@ export async function resolvePortal(
 
   const group = await db
     .from('client_groups')
-    .select('id, name, currency, portal_enabled, onboarding_stage, status')
+    .select(
+      'id, name, currency, portal_enabled, onboarding_stage, status, is_ortho',
+    )
     .eq('portal_token', token)
     .maybeSingle();
 
@@ -63,6 +67,7 @@ export async function resolvePortal(
       currency: group.data.currency,
       onboardingStage: group.data.onboarding_stage,
       status: group.data.status,
+      isOrtho: group.data.is_ortho,
     },
     locations: rows,
     locationIds: rows.map((row) => row.id),
@@ -74,13 +79,19 @@ export async function resolvePortal(
  * how the data is structured — consultations first, because that is the reason
  * anybody opens this link.
  */
-export const PORTAL_PAGES: ReadonlyArray<{ href: string; label: string }> = [
+export const PORTAL_PAGES: ReadonlyArray<{
+  href: string;
+  label: string;
+  /** Shown only to practices with is_ortho set. */
+  orthoOnly?: boolean;
+}> = [
   { href: '', label: 'Dashboard' },
   { href: '/consultations', label: 'Upcoming' },
   { href: '/appointments', label: 'Post consultation' },
   { href: '/creatives', label: 'Ads Creative' },
   { href: '/onboarding', label: 'Onboarding' },
   { href: '/agency-appointments', label: 'Calls with us' },
+  { href: '/faq', label: 'FAQ', orthoOnly: true },
   { href: '/support', label: 'Support' },
   { href: '/account', label: 'Account' },
 ];
@@ -90,6 +101,11 @@ export const PORTAL_PAGES: ReadonlyArray<{ href: string; label: string }> = [
  * link for, and the outcome form reads as a chore beside it. Support sits last
  * but one: it is needed rarely and urgently, so it wants a fixed, findable
  * place rather than a prominent one.
+ *
+ * FAQ sits just before Support so a practice meets the common answers before
+ * it raises a ticket asking one of them. Ortho only: the questions are the ones
+ * ortho practices put to us, and a general dentist would find half of them
+ * beside the point.
  *
  * "Calls with us" is kept separate from Support rather than absorbed into it.
  * Booking a call with us and reporting that something is broken are different

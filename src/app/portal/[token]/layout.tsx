@@ -48,7 +48,7 @@ export default async function PortalLayout({
           <Logo height={32} />
         </header>
 
-        <PortalNav token={params.token} />
+        <PortalNav token={params.token} isOrtho={portal.group.isOrtho} />
 
         <PortalRange token={params.token} />
 
