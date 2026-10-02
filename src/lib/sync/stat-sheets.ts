@@ -212,7 +212,7 @@ export async function syncStatSheets(ctx: SyncContext): Promise<void> {
 
   const routing = await db
     .from('pps_clinic_routing')
-    .select('client_id, practice, spreadsheet_id')
+    .select('client_id, practice, spreadsheet_id, extra_spreadsheet_ids')
     .not('client_id', 'is', null);
 
   if (routing.error) {
@@ -224,16 +224,25 @@ export async function syncStatSheets(ctx: SyncContext): Promise<void> {
   const seen = new Set<string>();
 
   for (const row of routing.data ?? []) {
-    if (!row.client_id || !row.spreadsheet_id) continue;
-    // One practice can appear twice in routing; one sheet is read once.
-    const key = `${row.client_id}::${row.spreadsheet_id}`;
-    if (seen.has(key)) continue;
-    seen.add(key);
-    targets.push({
-      clientId: row.client_id,
-      practice: row.practice ?? 'Unnamed',
-      spreadsheetId: row.spreadsheet_id,
-    });
+    if (!row.client_id) continue;
+    /*
+     * The routing sheet first, then any extra stat sheets for the same
+     * practice (migration 0109: VDNE keeps General Dentistry on its own
+     * sheet). Rows are keyed by spreadsheet too, so two sheets never collide.
+     */
+    const sheetIds = [row.spreadsheet_id, ...(row.extra_spreadsheet_ids ?? [])];
+    for (const spreadsheetId of sheetIds) {
+      if (!spreadsheetId) continue;
+      // One practice can appear twice in routing; one sheet is read once.
+      const key = `${row.client_id}::${spreadsheetId}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      targets.push({
+        clientId: row.client_id,
+        practice: row.practice ?? 'Unnamed',
+        spreadsheetId,
+      });
+    }
   }
 
   if (targets.length === 0) {

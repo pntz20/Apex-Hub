@@ -3759,6 +3759,7 @@ export type Database = {
           client_id: string
           created_at: string
           crm_location_id: string
+          extra_spreadsheet_ids: string[]
           notes: string | null
           practice: string
           source: string
@@ -3771,6 +3772,7 @@ export type Database = {
           client_id: string
           created_at?: string
           crm_location_id: string
+          extra_spreadsheet_ids?: string[]
           notes?: string | null
           practice: string
           source?: string
@@ -3783,6 +3785,7 @@ export type Database = {
           client_id?: string
           created_at?: string
           crm_location_id?: string
+          extra_spreadsheet_ids?: string[]
           notes?: string | null
           practice?: string
           source?: string
