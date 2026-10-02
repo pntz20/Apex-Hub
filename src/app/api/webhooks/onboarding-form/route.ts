@@ -45,6 +45,7 @@ import {
   kickoffClinicName,
   kickoffSlackText,
   kickoffValues,
+  onboardingSlackText,
 } from '@/lib/onboarding/kickoff';
 import { hubUrl } from '@/lib/app-url';
 import { postMessage } from '@/lib/slack/api';
@@ -319,6 +320,24 @@ export async function POST(request: NextRequest) {
   }
 
   const submissionId = written.data?.id ?? null;
+
+  // #tech-team, next to the Sales to CSM handoff. Best effort, like the kick off post.
+  if (body['is_test'] !== true) {
+    try {
+      await postMessage(
+        process.env.SLACK_KICKOFF_ALERT_CHANNEL || KICKOFF_ALERT_CHANNEL,
+        onboardingSlackText({
+          clinic: clinicName,
+          doctor: personName,
+          matched: match.groupId !== null,
+          provisioningUrl: hubUrl('/onboarding/provisioning'),
+        }),
+        'bot',
+      );
+    } catch (error) {
+      console.error('[onboarding] Slack post failed:', error instanceof Error ? error.message : error);
+    }
+  }
 
   /*
    * Provision now if it is allowed to happen unattended.

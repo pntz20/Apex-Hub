@@ -3,7 +3,7 @@
  * (read off form 1SggeGDzW2d72OQ6zYVA, 1 Oct 2026). Answers are made up.
  * Run with `npm run check:kickoff`.
  */
-import { kickoffClinicName, kickoffSlackText, kickoffValues } from '../src/lib/onboarding/kickoff';
+import { kickoffClinicName, kickoffSlackText, kickoffValues, onboardingSlackText } from '../src/lib/onboarding/kickoff';
 
 let failures = 0;
 function check(what: string, actual: unknown, expected: unknown) {
@@ -71,6 +71,13 @@ const unmatched = kickoffSlackText({ ...alertBase, outcome: 'unmatched', locatio
 check('unmatched: warning header', unmatched.startsWith(':warning:'), true);
 check('unmatched: links provisioning', unmatched.includes('<https://hub.example/onboarding/provisioning|'), true);
 check('unmatched: no sub-account line', unmatched.includes('Sub-account:'), false);
+
+// ---- the onboarding form post ---------------------------------------------
+const ob = onboardingSlackText({ clinic: 'Bright Smile Dental', doctor: 'Dr. Test', matched: false, provisioningUrl: 'https://hub.example/onboarding/provisioning' });
+check('onboarding: header', ob.split('\n')[0], ':clipboard: *Doctor Onboarding Form Submitted!*');
+check('onboarding: new practice line', ob.includes(':new: New practice'), true);
+check('onboarding: provisioning link', ob.includes('<https://hub.example/onboarding/provisioning|'), true);
+check('onboarding: no doctor line when blank', onboardingSlackText({ clinic: 'X', doctor: ' ', matched: true, provisioningUrl: null }).includes('Doctor:'), false);
 
 console.log(failures === 0 ? '\nall checks passed' : `\n${failures} check(s) FAILED`);
 process.exit(failures === 0 ? 0 : 1);

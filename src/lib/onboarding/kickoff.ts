@@ -200,6 +200,38 @@ export function kickoffSlackText(alert: KickoffAlert): string {
   return lines.join('\n');
 }
 
+/**
+ * The #tech-team message for a new doctor onboarding form, so it shows up
+ * next to the Sales to CSM handoff and the kick off post. Practice and doctor
+ * name only; the answers stay on the stored submission.
+ */
+export function onboardingSlackText(input: {
+  clinic: string | null;
+  doctor: string | null;
+  matched: boolean;
+  provisioningUrl: string | null;
+}): string {
+  const lines = [
+    ':clipboard: *Doctor Onboarding Form Submitted!*',
+    'The practice has filled in the onboarding form. It is saved in the Hub.',
+    '',
+    `:hospital: Clinic: ${input.clinic?.trim() || 'Unnamed clinic'}`,
+  ];
+  if (input.doctor?.trim()) lines.push(`:bust_in_silhouette: Doctor: ${input.doctor.trim()}`);
+  lines.push(
+    input.matched
+      ? ':link: Matched to an existing practice in the Hub'
+      : ':new: New practice (no match in the Hub yet)',
+  );
+  lines.push('');
+  lines.push(
+    input.provisioningUrl
+      ? `Next: create the sub-account from the snapshot, then click Set up in <${input.provisioningUrl}|Onboarding → Provisioning>.`
+      : 'Next: create the sub-account from the snapshot, then click Set up in Onboarding → Provisioning.',
+  );
+  return lines.join('\n');
+}
+
 /** The clinic the account manager named, for matching the practice. */
 export function kickoffClinicName(answers: Record<string, unknown>): string | null {
   for (const [question, raw] of Object.entries(answers)) {
