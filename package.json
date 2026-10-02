@@ -27,7 +27,8 @@
     "check:googlekey": "tsx scripts/check-google-key.ts",
     "check:leads": "tsx scripts/check-lead-columns.ts",
     "check:autoreply": "tsx scripts/check-autoreply.ts",
-    "check:booking": "tsx scripts/check-booking-fields.ts"
+    "check:booking": "tsx scripts/check-booking-fields.ts",
+    "check:pps": "tsx scripts/check-pps-unbilled.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.123.0",
