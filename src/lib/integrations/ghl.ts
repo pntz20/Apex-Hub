@@ -1302,6 +1302,20 @@ function parseContact(
   };
 }
 
+/**
+ * A plain GET on a sub-account's token, for read-only checks that need an
+ * endpoint nothing else here wraps (the PPS pre-charge check reads custom
+ * field definitions and contacts in the Pay Per Show System account).
+ */
+export async function ghlGet<T>(
+  clientId: string,
+  path: string,
+  params: Record<string, string> = {},
+): Promise<T> {
+  const { accessToken } = await getToken(clientId);
+  return request<T>(accessToken, path, params);
+}
+
 /** One contact, for the name and the attribution on a booking. */
 export async function getContact(
   clientId: string,

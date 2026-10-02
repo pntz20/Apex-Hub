@@ -28,7 +28,8 @@
     "check:leads": "tsx scripts/check-lead-columns.ts",
     "check:autoreply": "tsx scripts/check-autoreply.ts",
     "check:booking": "tsx scripts/check-booking-fields.ts",
-    "check:pps": "tsx scripts/check-pps-unbilled.ts"
+    "check:pps": "tsx scripts/check-pps-unbilled.ts",
+    "check:pps-precharge": "tsx scripts/check-pps-precharge.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.123.0",

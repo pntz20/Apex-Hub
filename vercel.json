@@ -40,6 +40,10 @@
     {
       "path": "/api/cron/pps-unbilled",
       "schedule": "45 14 * * 1-5"
+    },
+    {
+      "path": "/api/cron/pps-precharge",
+      "schedule": "0 22 * * 0,5"
     }
   ],
   "functions": {
